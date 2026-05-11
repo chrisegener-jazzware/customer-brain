@@ -127,6 +127,27 @@ def search_companies(
     ]
 
 
+@app.get("/companies/list", response_model=list[CompanySearchHit])
+def list_companies(
+    limit: int = 500,
+    s: Session = Depends(get_session),
+) -> list[CompanySearchHit]:
+    """List all seeded companies — used by the internal UI directory view."""
+    rows = s.scalars(
+        select(Company).order_by(desc(Company.risk_score), Company.name).limit(limit)
+    ).all()
+    return [
+        CompanySearchHit(
+            id=r.id,
+            name=r.name,
+            domain=r.domain,
+            risk_score=r.risk_score,
+            last_refreshed=r.last_refreshed.isoformat() if r.last_refreshed else None,
+        )
+        for r in rows
+    ]
+
+
 @app.get("/account/{company_id}", response_model=AccountView)
 def get_account(
     company_id: str,
