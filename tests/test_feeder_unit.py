@@ -32,7 +32,16 @@ def _client_stub() -> MagicMock:
     c.company_associations.side_effect = lambda cid, to: {
         "tickets": ["t1", "t2"],
         "deals": ["d1", "d2"],
-    }[to]
+        "contacts": [],
+        "calls": [],
+        "emails": [],
+        "meetings": [],
+        "notes": [],
+    }.get(to, [])
+    c.deal_associations.side_effect = lambda did, to: []
+    c.contact.return_value = None
+    c.engagement.return_value = None
+    c.quote.return_value = None
     c.ticket.side_effect = lambda tid: {
         "t1": {
             "id": "t1",
@@ -63,7 +72,7 @@ def _client_stub() -> MagicMock:
             },
         },
     }[tid]
-    c.deal.side_effect = lambda did: {
+    c.deal.side_effect = lambda did, with_stage_history=True: {
         "d1": {
             "id": "d1",
             "properties": {

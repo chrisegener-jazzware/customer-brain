@@ -42,5 +42,14 @@ def fmt_iso(s: str | None) -> str:
         return s
 
 
+def parse_iso(s: str | None) -> datetime | None:
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
 RISK_COLOR = {"red": "#d62728", "yellow": "#ff9f1c", "green": "#2ca02c"}
 RISK_EMOJI = {"red": "🔴", "yellow": "🟡", "green": "🟢"}
