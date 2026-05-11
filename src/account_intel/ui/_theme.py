@@ -11,7 +11,7 @@ emit them with `st.markdown(..., unsafe_allow_html=True)`.
 """
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 import streamlit as st
 
@@ -431,7 +431,7 @@ def kpi_row(items: Iterable[dict]) -> None:
     if not items:
         return
     cols = st.columns(len(items))
-    for col, it in zip(cols, items):
+    for col, it in zip(cols, items, strict=False):
         col.metric(
             it.get("label", ""),
             it.get("value", "—"),

@@ -19,7 +19,6 @@ from account_intel.ui._theme import (
     ai_subcard,
     inject_theme,
     kpi_row,
-    tldr_card,
 )
 
 st.set_page_config(
@@ -428,7 +427,7 @@ with tab_team:
         ("Executive Sponsor", "James Slatter, Group MD", "james.slatter@jazzware.com"),
     ]
     cols = st.columns(3)
-    for col, (title, name, email) in zip(cols, team_cards):
+    for col, (title, name, email) in zip(cols, team_cards, strict=False):
         with col:
             st.markdown(
                 f'<div class="ji-card">'
