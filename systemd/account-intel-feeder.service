@@ -1,0 +1,10 @@
+[Unit]
+Description=Jazzware Account Intel — HubSpot nightly refresh
+After=network-online.target account-intel-api.service
+
+[Service]
+Type=oneshot
+User=ec2-user
+WorkingDirectory=/opt/jazzware-account-intel
+EnvironmentFile=/opt/jazzware-account-intel/.env
+ExecStart=/opt/jazzware-account-intel/.venv/bin/python -c "from account_intel.feeders import HubSpotFeeder; r = HubSpotFeeder().refresh_active(); print(f'refreshed {len(r)} companies')"

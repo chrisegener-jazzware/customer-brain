@@ -1,0 +1,65 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: account_intel
+      POSTGRES_PASSWORD: account_intel
+      POSTGRES_DB: account_intel
+    ports:
+      - "5433:5432"
+    volumes:
+      - account_intel_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U account_intel -d account_intel"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://account_intel:account_intel@db:5432/account_intel
+    command: >
+      bash -c "alembic upgrade head &&
+               uvicorn account_intel.api.app:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+
+  ui-internal:
+    build: .
+    depends_on:
+      - api
+    env_file: .env
+    environment:
+      API_BASE_URL: http://api:8000
+    command: >
+      streamlit run src/account_intel/ui/internal_app.py
+        --server.address 0.0.0.0
+        --server.port 8502
+        --server.headless true
+        --browser.gatherUsageStats false
+    ports:
+      - "8502:8502"
+
+  ui-client:
+    build: .
+    depends_on:
+      - api
+    env_file: .env
+    environment:
+      API_BASE_URL: http://api:8000
+    command: >
+      streamlit run src/account_intel/ui/client_app.py
+        --server.address 0.0.0.0
+        --server.port 8503
+        --server.headless true
+        --browser.gatherUsageStats false
+    ports:
+      - "8503:8503"
+
+volumes:
+  account_intel_db:

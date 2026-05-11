@@ -1,0 +1,16 @@
+[Unit]
+Description=Jazzware Account Intel — Client UI (Streamlit, port 8503)
+After=network-online.target account-intel-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/opt/jazzware-account-intel
+EnvironmentFile=/opt/jazzware-account-intel/.env
+ExecStart=/opt/jazzware-account-intel/.venv/bin/streamlit run src/account_intel/ui/client_app.py --server.address 0.0.0.0 --server.port 8503 --server.headless true --browser.gatherUsageStats false
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

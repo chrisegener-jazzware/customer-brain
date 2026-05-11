@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly HubSpot feeder refresh (companies active in last 90d)
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+Unit=account-intel-feeder.service
+
+[Install]
+WantedBy=timers.target
