@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from ._common import (
+from account_intel.ui._common import (
     RISK_COLOR,
     RISK_EMOJI,
     api_get,

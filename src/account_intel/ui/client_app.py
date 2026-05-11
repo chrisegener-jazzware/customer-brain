@@ -14,7 +14,7 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from ._common import api_get, fmt_days, fmt_iso
+from account_intel.ui._common import api_get, fmt_days, fmt_iso
 
 st.set_page_config(
     page_title="Jazzware Customer Portal",
