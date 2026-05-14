@@ -5,6 +5,7 @@ bigger numbers, more whitespace, polished card system.
 """
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -112,6 +113,27 @@ summaries = (assessment.get("summaries") or {}) if assessment else {}
 
 # --- hero (tightened) ---------------------------------------------------------
 last_updated = fmt_iso(c.get("last_refreshed"))
+
+# Refresh button (top-right). Triggers a HubSpot pull for this single company
+# only — cheap and bounded. Heavy bulk refresh is handled by the nightly cron.
+_, _refresh_col = st.columns([6, 1])
+with _refresh_col:
+    if st.button(
+        "🔄 Refresh",
+        key="client_refresh",
+        use_container_width=True,
+        help="Pull the latest signals for this account from HubSpot",
+    ):
+        with st.spinner("Refreshing from HubSpot…"):
+            try:
+                from ._common import api_post  # local import; keeps top tidy
+                api_post(f"/account/{cid}/refresh")
+                # Tiny pause so the DB write lands before the rerun reads it.
+                time.sleep(0.5)
+                st.success("Refreshed.")
+                st.rerun()
+            except Exception as e:  # noqa: BLE001
+                st.error(f"Refresh failed: {e}")
 st.markdown(
     f"""
     <div class="ji-hero">
