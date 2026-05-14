@@ -67,33 +67,70 @@ THEME_CSS = """
 }
 
 /* ---- Page chrome ---- */
+/* Streamlit's top decoration bar is fixed-position. Pad the block container so
+   page content never slides under it. */
 .block-container {
-  padding-top: 1.1rem;
-  padding-bottom: 3rem;
+  padding-top: 4.5rem;
+  padding-bottom: 4rem;
   max-width: 1500px;
 }
-h1, h2, h3, h4, h5, h6 { color: var(--navy-900); }
-h1 { margin-bottom: 0.2rem; }
+/* Hide the default Streamlit header decoration bar — it's a thin colored strip
+   that visually clips into content under reverse proxies. */
+[data-testid="stHeader"] {
+  background: transparent;
+  height: 0;
+}
+[data-testid="stDecoration"] { display: none; }
+/* Streamlit toolbar (deploy/share buttons) — hide in production embed */
+[data-testid="stToolbar"] { display: none; }
+/* Hamburger menu — also redundant when running behind nginx */
+#MainMenu { visibility: hidden; }
+footer { visibility: hidden; }
+
+h1, h2, h3, h4, h5, h6 {
+  color: var(--navy-900);
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  letter-spacing: -0.01em;
+}
+h1 { margin-bottom: 0.2rem; font-weight: 700; }
+h2 { font-weight: 650; }
+h3 { font-weight: 600; }
 a { color: var(--blue-600); }
+a:hover { color: var(--navy-700); text-decoration: underline; }
+
+body, .stApp {
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  background: var(--slate-50);
+}
+
+/* Smoother dividers */
+hr { border-color: var(--slate-100); margin: 1.5rem 0; }
 
 /* ---- st.metric polish ---- */
 [data-testid="stMetric"] {
   background: var(--white);
-  padding: 12px 16px;
-  border-radius: 10px;
-  border: 1px solid var(--slate-300);
-  box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+  padding: 16px 20px;
+  border-radius: 12px;
+  border: 1px solid var(--slate-100);
+  box-shadow: 0 1px 3px rgba(15,23,42,0.04), 0 1px 2px rgba(15,23,42,0.02);
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+[data-testid="stMetric"]:hover {
+  box-shadow: 0 4px 12px rgba(15,23,42,0.08), 0 2px 4px rgba(15,23,42,0.04);
 }
 [data-testid="stMetric"] label,
 [data-testid="stMetric"] [data-testid="stMetricLabel"] {
   color: var(--slate-500) !important;
-  font-size: 0.78em;
+  font-size: 0.72em;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
+  font-weight: 600;
 }
 [data-testid="stMetric"] [data-testid="stMetricValue"] {
   color: var(--navy-900) !important;
   font-weight: 700;
+  font-size: 1.65em;
+  line-height: 1.2;
 }
 [data-testid="stMetric"] [data-testid="stMetricDelta"] {
   color: var(--slate-700) !important;
@@ -101,17 +138,28 @@ a { color: var(--blue-600); }
 }
 
 /* ---- Tabs ---- */
-[data-baseweb="tab-list"] { gap: 4px; }
+[data-baseweb="tab-list"] {
+  gap: 4px;
+  border-bottom: 1px solid var(--slate-100);
+  padding: 0 4px;
+}
 [data-baseweb="tab"] {
-  background: var(--white) !important;
-  color: var(--slate-700) !important;
+  background: transparent !important;
+  color: var(--slate-500) !important;
   border-radius: 8px 8px 0 0;
-  padding: 8px 14px !important;
+  padding: 10px 18px !important;
+  font-weight: 500;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+[data-baseweb="tab"]:hover {
+  color: var(--navy-900) !important;
+  background: var(--slate-50) !important;
 }
 [data-baseweb="tab"][aria-selected="true"] {
-  background: var(--blue-50) !important;
-  color: var(--navy-900) !important;
+  background: var(--white) !important;
+  color: var(--blue-600) !important;
   font-weight: 600;
+  border-bottom: 2px solid var(--blue-600);
 }
 
 /* ---- Sidebar (scoped, no global * override) ---- */
@@ -147,22 +195,57 @@ a { color: var(--blue-600); }
   background: rgba(255,255,255,0.20);
   border-color: rgba(255,255,255,0.40);
 }
-/* Primary action button (main area) */
+/* All buttons (main area) */
+.stButton > button {
+  border-radius: 8px;
+  font-weight: 500;
+  padding: 8px 16px;
+  transition: all 0.15s ease;
+  border: 1px solid var(--slate-300);
+  background: var(--white);
+  color: var(--slate-700);
+}
+.stButton > button:hover {
+  border-color: var(--blue-600);
+  color: var(--blue-600);
+  box-shadow: 0 1px 3px rgba(37,99,235,0.12);
+}
 .stButton > button[kind="primary"] {
   background: var(--blue-600);
   color: var(--white);
   border: 1px solid var(--blue-600);
+  box-shadow: 0 1px 3px rgba(37,99,235,0.2);
+}
+.stButton > button[kind="primary"]:hover {
+  background: var(--navy-700);
+  border-color: var(--navy-700);
+  color: var(--white);
+  box-shadow: 0 4px 12px rgba(37,99,235,0.25);
+}
+
+/* Inputs / textareas */
+.stTextInput input, .stTextArea textarea, .stNumberInput input, .stSelectbox div[data-baseweb="select"] {
+  border-radius: 8px !important;
+  border-color: var(--slate-300) !important;
+}
+.stTextInput input:focus, .stTextArea textarea:focus {
+  border-color: var(--blue-600) !important;
+  box-shadow: 0 0 0 2px rgba(37,99,235,0.15) !important;
 }
 
 /* ---- Reusable card classes (all set background AND color) ---- */
 .ji-card {
   background: var(--white);
   color: var(--slate-900);
-  border: 1px solid var(--slate-300);
-  border-radius: 10px;
-  padding: 14px 18px;
-  margin-bottom: 12px;
-  box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+  border: 1px solid var(--slate-100);
+  border-radius: 12px;
+  padding: 18px 22px;
+  margin-bottom: 14px;
+  box-shadow: 0 1px 3px rgba(15,23,42,0.04), 0 1px 2px rgba(15,23,42,0.02);
+  transition: box-shadow 0.15s ease;
+}
+.ji-card:hover {
+  box-shadow: 0 4px 12px rgba(15,23,42,0.06), 0 2px 4px rgba(15,23,42,0.03);
 }
 .ji-card .ji-card-title {
   color: var(--navy-900);
@@ -196,11 +279,12 @@ a { color: var(--blue-600); }
 .ji-risk-banner {
   background: var(--white);
   color: var(--slate-900);
-  border: 1px solid var(--slate-300);
-  border-left: 6px solid var(--slate-500);
-  border-radius: 10px;
-  padding: 12px 18px;
-  margin: 4px 0 14px 0;
+  border: 1px solid var(--slate-100);
+  border-left: 4px solid var(--slate-500);
+  border-radius: 12px;
+  padding: 16px 22px;
+  margin: 4px 0 18px 0;
+  box-shadow: 0 1px 3px rgba(15,23,42,0.04);
 }
 .ji-risk-banner .ji-risk-header {
   color: var(--navy-900);
@@ -243,11 +327,17 @@ a { color: var(--blue-600); }
 .ji-hot-row {
   background: var(--white);
   color: var(--slate-900);
-  border: 1px solid var(--slate-300);
-  border-radius: 8px;
-  padding: 10px 14px;
+  border: 1px solid var(--slate-100);
+  border-radius: 10px;
+  padding: 12px 16px;
   margin-bottom: 8px;
   font-size: 0.92em;
+  box-shadow: 0 1px 2px rgba(15,23,42,0.03);
+  transition: transform 0.1s ease, box-shadow 0.15s ease;
+}
+.ji-hot-row:hover {
+  transform: translateX(2px);
+  box-shadow: 0 2px 6px rgba(15,23,42,0.06);
 }
 .ji-hot-row b { color: var(--navy-900); }
 .ji-hot-row .ji-hot-detail { color: var(--slate-500); font-size: 0.86em; }
@@ -275,10 +365,22 @@ a { color: var(--blue-600); }
 .ji-hero {
   background: linear-gradient(135deg, var(--navy-900) 0%, #1e3a72 50%, #2e5cb8 100%);
   color: var(--white);
-  padding: 22px 30px;
-  border-radius: 12px;
-  margin-bottom: 18px;
-  box-shadow: 0 4px 14px rgba(11,29,58,0.18);
+  padding: 28px 36px;
+  border-radius: 16px;
+  margin-bottom: 22px;
+  box-shadow: 0 8px 24px rgba(11,29,58,0.22), 0 2px 6px rgba(11,29,58,0.12);
+  position: relative;
+  overflow: hidden;
+}
+.ji-hero::after {
+  content: "";
+  position: absolute;
+  top: -50%;
+  right: -10%;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(255,255,255,0.06) 0%, transparent 70%);
+  pointer-events: none;
 }
 .ji-hero .ji-hero-eyebrow {
   color: rgba(255,255,255,0.82);
