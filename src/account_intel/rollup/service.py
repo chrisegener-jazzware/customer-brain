@@ -259,7 +259,11 @@ class RollupService:
         try:
             import anthropic  # type: ignore
 
-            self._client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+            from _token_tracker import track as _tt_track
+            self._client = _tt_track(
+                anthropic.Anthropic(api_key=settings.anthropic_api_key),
+                project="customer-brain",
+            )
             return self._client
         except Exception as e:  # noqa: BLE001
             log.warning("anthropic client unavailable: %s", e)

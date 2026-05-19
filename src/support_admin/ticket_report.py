@@ -350,7 +350,8 @@ def cluster_with_claude(
     except ImportError as e:
         raise RuntimeError("anthropic package not installed; pip install anthropic") from e
 
-    client = anthropic.Anthropic(api_key=api_key)
+    from _token_tracker import track as _tt_track
+    client = _tt_track(anthropic.Anthropic(api_key=api_key), project="customer-brain")
     by_id = {t.id: t for t in tickets}
     all_raw_clusters: list[tuple[str, float, list[str]]] = []
 
