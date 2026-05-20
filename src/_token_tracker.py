@@ -50,7 +50,10 @@ def _cost(model: str, inp: int, out: int, cw: int, cr: int) -> float:
 
 
 def _db_path() -> str:
-    return os.environ.get("TOKEN_COUNTER_DB", "/var/lib/jazzware/token_counter.db")
+    return os.environ.get(
+        "TOKEN_COUNTER_DB",
+        os.path.expanduser("~/.openclaw/token-counter/token_counter.db"),
+    )
 
 
 _SCHEMA = """
