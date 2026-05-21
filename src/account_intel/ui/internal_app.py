@@ -387,7 +387,7 @@ if risk_hist and len(risk_hist) >= 2:
             st.caption(f"chart error: {exc}")
 
 # --- tabs ---------------------------------------------------------------------
-tab_support, tab_sales, tab_quotes, tab_contacts, tab_activity, tab_metrics, tab_hot, tab_integ, tab_ask, tab_raw = st.tabs(
+tab_support, tab_sales, tab_quotes, tab_contacts, tab_activity, tab_metrics, tab_hot, tab_modules, tab_integ, tab_ask, tab_raw = st.tabs(
     [
         f"🎫 Support ({len(tickets)})",
         f"💰 Sales ({len(deals)})",
@@ -396,6 +396,7 @@ tab_support, tab_sales, tab_quotes, tab_contacts, tab_activity, tab_metrics, tab
         f"📅 Activity ({len(activities)})",
         "📊 Metrics",
         f"🔥 Hot signals ({len(hot_signals)})",
+        "🧠 Modules",
         "🔌 Integrations",
         "💬 Ask AI",
         "📦 Raw",
@@ -654,6 +655,33 @@ with tab_integ:
                 f"· last sync {fmt_iso(i['last_sync'])} "
                 f"· errors 24h {i['error_count_24h'] or 0}"
             )
+
+# --- JAZ-113/114/115: Modules tab --------------------------------------------
+with tab_modules:
+    try:
+        modules = api_get(f"/account/{cid}/modules") or []
+    except Exception as exc:  # noqa: BLE001
+        modules = []
+        st.error(f"modules load failed: {exc}")
+    if not modules:
+        st.info("No module data yet.")
+    sev_emoji = {"high": "🔴", "medium": "🟡", "low": "🟢", "na": "⚪"}
+    for m in modules:
+        emoji = sev_emoji.get(m["severity"], "⚪")
+        score_str = f"{m['score']:.0f}" if m.get("score") is not None else "—"
+        with st.expander(f"{emoji} **{m['label']}** ({score_str}) — {m['headline']}", expanded=(m["severity"] in {"high","medium"})):
+            if m.get("drivers"):
+                st.markdown("**Signals:**")
+                for d in m["drivers"]:
+                    parts = [f"`{d.get('name','?')}`"]
+                    for k, v in d.items():
+                        if k == "name":
+                            continue
+                        parts.append(f"{k}={v}")
+                    st.markdown("- " + " · ".join(parts))
+            if m.get("metrics"):
+                st.markdown("**Metrics:**")
+                st.json(m["metrics"])
 
 # --- JAZ-185: Ask AI ----------------------------------------------------------
 with tab_ask:

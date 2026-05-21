@@ -735,3 +735,30 @@ def update_nba(company_id: str, body: NBAUpdateRequest, s: Session = Depends(get
     flag_modified(row, "next_best_actions")
     s.commit()
     return {"company_id": company_id, "action_index": body.action_index, "status": body.status}
+
+
+# ---- JAZ-113/114/115: Modules engine ---------------------------------------
+
+class ModuleResultDTO(BaseModel):
+    module_id: str
+    label: str
+    score: float | None
+    severity: str
+    headline: str
+    drivers: list[dict]
+    metrics: dict
+
+
+@app.get("/account/{company_id}/modules", response_model=list[ModuleResultDTO])
+def get_modules(company_id: str, s: Session = Depends(get_session)) -> list[ModuleResultDTO]:
+    if s.get(Company, company_id) is None:
+        raise HTTPException(404, f"unknown company {company_id}")
+    from ..modules import run_all
+    return [
+        ModuleResultDTO(
+            module_id=r.module_id, label=r.label, score=r.score,
+            severity=r.severity, headline=r.headline,
+            drivers=r.drivers, metrics=r.metrics,
+        )
+        for r in run_all(s, company_id)
+    ]
