@@ -670,70 +670,101 @@ with tab_modules:
         st.error(f"modules load failed: {exc}")
     if not modules:
         st.info("No module data yet.")
+    # Card-grid layout: one column per module, colored border + big score.
+    sev_color = {"high": "#d62728", "medium": "#ff9f1c", "low": "#2ca02c", "na": "#94a3b8"}
     sev_emoji = {"high": "🔴", "medium": "🟡", "low": "🟢", "na": "⚪"}
-    for m in modules:
-        emoji = sev_emoji.get(m["severity"], "⚪")
-        score_str = f"{m['score']:.0f}" if m.get("score") is not None else "—"
-        with st.expander(f"{emoji} **{m['label']}** ({score_str}) — {m['headline']}", expanded=(m["severity"] in {"high","medium"})):
-            if m.get("drivers"):
-                st.markdown("**Signals:**")
-                for d in m["drivers"]:
-                    parts = [f"`{d.get('name','?')}`"]
-                    for k, v in d.items():
-                        if k == "name":
-                            continue
-                        parts.append(f"{k}={v}")
-                    st.markdown("- " + " · ".join(parts))
-            if m.get("metrics"):
-                st.markdown("**Metrics:**")
-                st.json(m["metrics"])
+    if modules:
+        cols = st.columns(len(modules))
+        for i, m in enumerate(modules):
+            with cols[i]:
+                color = sev_color.get(m["severity"], "#94a3b8")
+                emoji = sev_emoji.get(m["severity"], "⚪")
+                score_str = f"{m['score']:.0f}" if m.get("score") is not None else "—"
+                top_driver = (m.get("drivers") or [{}])[0].get("name", "—") if m.get("drivers") else "—"
+                st.markdown(
+                    f"<div style='border:1px solid {color}; border-left:6px solid {color}; "
+                    f"border-radius:8px; padding:14px 16px; margin-bottom:8px;'>"
+                    f"<div style='color:{color}; font-size:12px; font-weight:600; letter-spacing:0.04em;'>"
+                    f"{emoji} {m['label'].upper()}</div>"
+                    f"<div style='font-size:42px; font-weight:700; line-height:1.1; margin:4px 0;'>{score_str}</div>"
+                    f"<div style='color:#475569; font-size:13px; margin-bottom:4px;'>{m['headline']}</div>"
+                    f"<div style='color:#94a3b8; font-size:11px;'>top signal: <code>{top_driver}</code></div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+        # Drill-down expanders below the card row.
+        for m in modules:
+            with st.expander(f"→ {m['label']} — details", expanded=False):
+                if m.get("drivers"):
+                    st.markdown("**Signals:**")
+                    for d in m["drivers"]:
+                        parts = [f"`{d.get('name','?')}`"]
+                        for k, v in d.items():
+                            if k == "name":
+                                continue
+                            parts.append(f"{k}={v}")
+                        st.markdown("- " + " · ".join(parts))
+                if m.get("metrics"):
+                    st.caption("Metrics")
+                    st.json(m["metrics"])
 
 # --- JAZ-185: Ask AI ----------------------------------------------------------
 with tab_ask:
     st.markdown(
         "Ask anything about this account. Claude is constrained to the signals "
-        "on this page — ticket history, deals, contacts, activities, quotes. "
-        "It cites specific records and refuses to guess."
+        "on this page — tickets, deals, contacts, activities, quotes. Cites "
+        "specific records and refuses to guess."
     )
     ask_key = f"ask_history_{cid}"
+    pending_key = f"ask_pending_{cid}"
     if ask_key not in st.session_state:
         st.session_state[ask_key] = []
-    history_container = st.container()
-    with history_container:
-        for turn in st.session_state[ask_key]:
-            st.markdown(f"**👤 You:** {turn['q']}")
-            st.markdown(f"**🤖 AI:** {turn['a']}")
-            if turn.get("citations"):
-                st.caption("Cited: " + " · ".join(turn["citations"]))
-            st.divider()
 
+    # Suggestion chips — setting pending triggers the same answer flow as chat_input.
     suggestions = [
         "What are the biggest risks right now?",
         "Are there any stalled deals?",
         "Who should I reach out to first?",
         "Summarize the last 30 days of activity.",
     ]
-    sug_cols = st.columns(len(suggestions))
-    chosen_question = None
-    for i, s in enumerate(suggestions):
-        if sug_cols[i].button(s, key=f"sug_{i}"):
-            chosen_question = s
-
-    with st.form(f"ask_form_{cid}", clear_on_submit=True):
-        q = st.text_input("Your question", value=chosen_question or "", key=f"ask_input_{cid}")
-        submitted = st.form_submit_button("Ask")
-    if submitted and q.strip():
-        with st.spinner("Thinking..."):
-            try:
-                result = api_post(f"/account/{cid}/ask", json={"question": q})
-                st.session_state[ask_key].append({
-                    "q": q, "a": result.get("answer",""),
-                    "citations": result.get("citations", []),
-                    "model": result.get("model",""),
-                })
+    if not st.session_state[ask_key]:
+        sug_cols = st.columns(len(suggestions))
+        for i, sug in enumerate(suggestions):
+            if sug_cols[i].button(sug, key=f"sug_{cid}_{i}", use_container_width=True):
+                st.session_state[pending_key] = sug
                 st.rerun()
-            except Exception as exc:  # noqa: BLE001
-                st.error(f"Ask failed: {exc}")
+
+    # Render conversation history with native chat bubbles.
+    for turn in st.session_state[ask_key]:
+        with st.chat_message("user"):
+            st.markdown(turn["q"])
+        with st.chat_message("assistant"):
+            st.markdown(turn["a"])
+            if turn.get("citations"):
+                st.caption("Cited: " + " · ".join(turn["citations"]))
+
+    # Resolve the next question (chat_input OR pending suggestion).
+    user_q = st.chat_input("Ask about this account…", key=f"chat_input_{cid}")
+    if not user_q and st.session_state.get(pending_key):
+        user_q = st.session_state.pop(pending_key)
+
+    if user_q and user_q.strip():
+        with st.chat_message("user"):
+            st.markdown(user_q)
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking…"):
+                try:
+                    result = api_post(f"/account/{cid}/ask", json={"question": user_q})
+                    st.session_state[ask_key].append({
+                        "q": user_q,
+                        "a": result.get("answer", ""),
+                        "citations": result.get("citations", []),
+                        "model": result.get("model", ""),
+                    })
+                    st.rerun()
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"Ask failed: {exc}")
+
     if st.session_state[ask_key]:
         if st.button("Clear conversation", key=f"clear_ask_{cid}"):
             st.session_state[ask_key] = []

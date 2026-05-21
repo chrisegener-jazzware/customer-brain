@@ -41,12 +41,25 @@ def compute(s: Session, company_id: str):
 
     quote_total = sum((q.amount or 0) for q in quotes)
 
-    # Score: penalizes high stalled-share of pipeline.
+    # Score blends multiple factors so accounts with similar single-metrics still differentiate.
     if pipeline_value > 0:
         stalled_share = stalled_value / pipeline_value
     else:
         stalled_share = 0
-    score = round(min(stalled_share * 100, 100), 1)
+    # Base: stalled share of pipeline (0-60).
+    score = min(stalled_share * 60, 60)
+    # Add: closed-lost ratio (last 12mo proxy = all-time here, 0-20).
+    total_closed = len(closed_won) + len(closed_lost)
+    if total_closed:
+        lost_ratio = len(closed_lost) / total_closed
+        score += min(lost_ratio * 20, 20)
+    # Add: zero-activity penalty if has open deals but no quotes/recent updates (0-10).
+    if open_deals and not quotes:
+        score += 10
+    # Add: large pipeline w/ no movement (0-10) — lots of value sitting.
+    if pipeline_value > 100_000 and len(stalled) > 0:
+        score += min(10, pipeline_value / 200_000)
+    score = round(min(score, 100), 1)
 
     drivers = []
     if stalled:
