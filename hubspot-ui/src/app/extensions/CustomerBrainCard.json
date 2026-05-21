@@ -1,0 +1,14 @@
+{
+  "type": "crm-card",
+  "data": {
+    "title": "Customer Brain",
+    "uid": "customer-brain-card",
+    "location": "crm.company.sidebar",
+    "module": {
+      "file": "CustomerBrainCard.jsx"
+    },
+    "objectTypes": [
+      { "name": "companies" }
+    ]
+  }
+}

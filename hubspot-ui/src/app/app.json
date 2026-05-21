@@ -1,0 +1,19 @@
+{
+  "name": "Customer Brain",
+  "description": "Surfaces per-account risk score, narrative, and top-3 next-best-actions on the HubSpot company sidebar. Reads from the customer-brain service.",
+  "uid": "customer-brain-ui",
+  "public": false,
+  "scopes": [
+    "crm.objects.companies.read",
+    "crm.schemas.companies.read"
+  ],
+  "extensions": {
+    "crm": {
+      "cards": [
+        {
+          "file": "extensions/CustomerBrainCard.json"
+        }
+      ]
+    }
+  }
+}

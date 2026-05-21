@@ -1,0 +1,26 @@
+{
+  "customerName": "Sunset Bay Resort (sample)",
+  "score": 38,
+  "flag": "red",
+  "narrative": "12 open tickets in the last 30 days, 5 marked high-priority, average time-to-close 38h. Opera-PMS integration showing 25% error rate for 7 days. Three active deals stalled in 'Contract Sent' for 45+ days.",
+  "actions": [
+    {
+      "id": "a1",
+      "title": "Schedule executive sync with GM",
+      "rationale": "Risk score in red band — exec touch unblocks PMS integration issue + signals attention.",
+      "owner": "AM"
+    },
+    {
+      "id": "a2",
+      "title": "Open Sev-1 with Opera integration team",
+      "rationale": "7-day failure rate at 25% — auto-create incident, ping support lead.",
+      "owner": "Support"
+    },
+    {
+      "id": "a3",
+      "title": "Re-engage stalled deals (3 in Contract Sent 45d+)",
+      "rationale": "Combined ARR $84K. Send recap + decision-criteria email.",
+      "owner": "AM"
+    }
+  ]
+}

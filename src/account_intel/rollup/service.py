@@ -244,6 +244,86 @@ class RollupService:
             s.refresh(row)
             return row
 
+    def ask(self, company_id: str, question: str) -> dict[str, Any]:
+        """JAZ-185 — grounded Q&A on a single account's signals.
+
+        Builds the same signal payload used for rollups, then asks Claude
+        the user's question constrained to those facts. Returns a dict:
+          {"answer": str, "model": str, "citations": list[str]}
+
+        Citations are signal-source tags Claude is instructed to cite
+        (e.g. "ticket:T-1234", "deal:D-9876"). Falls back to a heuristic
+        no-AI response if Claude is unavailable.
+        """
+        with self.session_factory() as s:
+            payload = build_signals_payload(s, company_id)
+        client = self._ensure_client()
+        if client is None:
+            return {
+                "answer": self._heuristic_ask(payload, question),
+                "model": "heuristic-fallback",
+                "citations": [],
+            }
+        try:
+            system = (
+                "You are a customer-intelligence analyst answering questions "
+                "about a single account using ONLY the signals payload "
+                "provided. Cite specific tickets, deals, contacts, or "
+                "activities inline using the format [ticket:ID], [deal:ID], "
+                "[contact:ID]. If the answer is not in the signals, say so "
+                "plainly — do not guess. Keep answers under 200 words "
+                "unless the user explicitly asks for more depth."
+            )
+            user_msg = (
+                f"Question: {question}\n\n"
+                f"Signals payload:\n```json\n{json.dumps(payload, indent=2)}\n```"
+            )
+            model = _pick_model(payload)
+            resp = client.messages.create(
+                model=model,
+                max_tokens=900,
+                system=system,
+                messages=[{"role": "user", "content": user_msg}],
+            )
+            text = resp.content[0].text  # type: ignore[attr-defined]
+            # Extract citation tags for the UI to render as pills.
+            import re
+            cites = sorted(set(re.findall(r"\[(ticket|deal|contact|activity|quote):([\w\-]+)\]", text)))
+            citation_strs = [f"{k}:{v}" for k, v in cites]
+            return {"answer": text, "model": model, "citations": citation_strs}
+        except Exception as e:  # noqa: BLE001
+            log.exception("ask() failed, falling back: %s", e)
+            return {
+                "answer": self._heuristic_ask(payload, question),
+                "model": "heuristic-fallback",
+                "citations": [],
+            }
+
+    @staticmethod
+    def _heuristic_ask(payload: dict, question: str) -> str:
+        q = (question or "").lower()
+        tickets = payload.get("tickets", [])
+        deals = payload.get("deals", [])
+        open_t = [t for t in tickets if t.get("is_open")]
+        if any(k in q for k in ("ticket", "open", "support", "issue")):
+            if not open_t:
+                return "No open tickets in the signal store for this account."
+            top = sorted(open_t, key=lambda t: -(t.get("age_days") or 0))[:5]
+            lines = [
+                f"- {t.get('subject') or t.get('id')} (age {t.get('age_days')}d, priority {t.get('priority') or 'normal'})"
+                for t in top
+            ]
+            return f"{len(open_t)} open ticket(s). Oldest:\n" + "\n".join(lines)
+        if any(k in q for k in ("deal", "pipeline", "renewal", "quote")):
+            return (
+                f"{len(deals)} deal(s) tracked, {sum(1 for d in deals if d.get('stalled'))} stalled. "
+                "Enable ANTHROPIC_API_KEY for richer answers."
+            )
+        return (
+            "Claude not configured — only summary statistics are available. "
+            f"Open tickets: {len(open_t)}, deals: {len(deals)}."
+        )
+
     def recompute_summaries(self, company_id: str) -> AIAssessment:
         """Recompute the multi-zoom summaries (cheaper than full rollup)."""
         return self.get_or_create(company_id, force=True)
@@ -259,7 +339,11 @@ class RollupService:
         try:
             import anthropic  # type: ignore
 
-            self._client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+            from _token_tracker import track as _tt_track
+            self._client = _tt_track(
+                anthropic.Anthropic(api_key=settings.anthropic_api_key),
+                project="customer-brain",
+            )
             return self._client
         except Exception as e:  # noqa: BLE001
             log.warning("anthropic client unavailable: %s", e)

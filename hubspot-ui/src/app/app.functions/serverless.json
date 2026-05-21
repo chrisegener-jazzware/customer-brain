@@ -1,0 +1,8 @@
+{
+  "appFunctions": {
+    "fetchAccount": {
+      "file": "fetchAccount.js",
+      "secrets": ["CUSTOMER_BRAIN_URL", "CUSTOMER_BRAIN_API_KEY", "STREAMLIT_BASE_URL"]
+    }
+  }
+}

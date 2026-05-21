@@ -273,8 +273,9 @@ def _build_narrative(
         return _fallback_narrative(name, score, flag, components, tickets, integrations)
     try:
         from anthropic import Anthropic
+        from _token_tracker import track as _tt_track
 
-        client = Anthropic(api_key=api_key)
+        client = _tt_track(Anthropic(api_key=api_key), project="customer-brain")
         resp = client.messages.create(
             model=s.claude_model,
             max_tokens=s.claude_summary_max_tokens,
