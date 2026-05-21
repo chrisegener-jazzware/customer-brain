@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from ..db import (
     ActivitySignal,
+    AIAssessment,
     Company,
     ContactSignal,
     DealSignal,
@@ -643,3 +644,94 @@ def refresh_summaries(company_id: str, s: Session = Depends(get_session)) -> dic
         }
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"summaries refresh failed: {e}") from e
+
+
+# ---- JAZ-185: Ask AI per account (grounded Q&A) ----------------------------
+
+class AskRequest(BaseModel):
+    question: str
+
+
+class AskResponse(BaseModel):
+    answer: str
+    model: str
+    citations: list[str]
+
+
+@app.post("/account/{company_id}/ask", response_model=AskResponse)
+def ask_account(company_id: str, body: AskRequest, s: Session = Depends(get_session)) -> AskResponse:
+    if s.get(Company, company_id) is None:
+        raise HTTPException(404, f"unknown company {company_id}")
+    if not body.question.strip():
+        raise HTTPException(400, "empty question")
+    result = RollupService(
+        session_factory=_shared_session_factory(s)
+    ).ask(company_id, body.question)
+    return AskResponse(**result)
+
+
+# ---- JAZ-187: Risk/sentiment trajectory history ----------------------------
+
+class RiskHistoryPoint(BaseModel):
+    generated_at: str
+    risk_flag: str
+    risk_score: float | None
+    model: str | None
+
+
+@app.get("/account/{company_id}/risk_history", response_model=list[RiskHistoryPoint])
+def risk_history(company_id: str, limit: int = 30, s: Session = Depends(get_session)) -> list[RiskHistoryPoint]:
+    if s.get(Company, company_id) is None:
+        raise HTTPException(404, f"unknown company {company_id}")
+    rows = s.scalars(
+        select(AIAssessment)
+        .where(AIAssessment.company_id == company_id)
+        .order_by(AIAssessment.generated_at.desc())
+        .limit(limit)
+    ).all()
+    return [
+        RiskHistoryPoint(
+            generated_at=r.generated_at.isoformat(),
+            risk_flag=r.risk_flag,
+            risk_score=r.risk_score,
+            model=r.model,
+        )
+        for r in reversed(rows)
+    ]
+
+
+# ---- JAZ-186: Next-best-action persistence (mark done / dismiss) -----------
+
+class NBAUpdateRequest(BaseModel):
+    action_index: int
+    status: str  # 'done' | 'dismissed' | 'reopened'
+
+
+@app.post("/account/{company_id}/nba/update")
+def update_nba(company_id: str, body: NBAUpdateRequest, s: Session = Depends(get_session)) -> dict:
+    """Mark a next-best-action as done / dismissed. Mutates the latest
+    assessment row in place so the UI reflects the change immediately.
+    A re-rolled assessment will regenerate fresh actions."""
+    if s.get(Company, company_id) is None:
+        raise HTTPException(404, f"unknown company {company_id}")
+    if body.status not in {"done", "dismissed", "reopened"}:
+        raise HTTPException(400, "status must be done|dismissed|reopened")
+    row = s.scalars(
+        select(AIAssessment)
+        .where(AIAssessment.company_id == company_id)
+        .order_by(AIAssessment.generated_at.desc())
+        .limit(1)
+    ).first()
+    if row is None or not row.next_best_actions:
+        raise HTTPException(404, "no assessment / no actions to update")
+    actions = list(row.next_best_actions)
+    if not (0 <= body.action_index < len(actions)):
+        raise HTTPException(400, f"action_index {body.action_index} out of range")
+    actions[body.action_index] = {**actions[body.action_index], "status": body.status,
+                                  "updated_at": datetime.utcnow().isoformat()}
+    row.next_best_actions = actions
+    # SQLAlchemy needs a hint when mutating JSON in-place
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(row, "next_best_actions")
+    s.commit()
+    return {"company_id": company_id, "action_index": body.action_index, "status": body.status}

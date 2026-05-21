@@ -199,6 +199,17 @@ def _load_extras(cid: str):
 
 
 extras = _load_extras(cid)
+
+# JAZ-186 helper — mark a next-best-action done/dismissed via API.
+def _update_nba(cid: str, idx: int, status: str) -> None:
+    try:
+        api_post(f"/account/{cid}/nba/update", json={"action_index": idx, "status": status})
+        st.cache_data.clear()
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"NBA update failed: {exc}")
+
+# Alias for ease of reading in the NBA expander.
+company_id = cid
 metrics = extras["metrics"] or {}
 contacts = extras["contacts"] or []
 activities = extras["activities"] or []
@@ -323,22 +334,60 @@ with right_col:
                     st.markdown(f"- {x}")
             else:
                 st.caption("—")
-        with st.expander(f"⚡ Next best actions ({len(nbas)})", expanded=False):
-            if nbas:
-                for nba in nbas:
-                    st.markdown(
-                        f"- **{nba.get('who','?')}** — {nba.get('action','?')}  \n"
-                        f"  *{nba.get('rationale','')}*"
-                    )
-            else:
-                st.caption("—")
+        # JAZ-186 — NBAs with 1-click triage (mark done / dismiss).
+        active_nbas = [(idx, n) for idx, n in enumerate(nbas)
+                       if (n.get("status") not in {"done", "dismissed"})]
+        with st.expander(f"⚡ Next best actions ({len(active_nbas)} active / {len(nbas)} total)", expanded=True):
+            if not active_nbas:
+                st.caption("— all clear")
+            for idx, nba in active_nbas:
+                cols = st.columns([6, 1, 1])
+                cols[0].markdown(
+                    f"**{nba.get('who','?')}** — {nba.get('action','?')}  \n"
+                    f"*{nba.get('rationale','')}*"
+                )
+                if cols[1].button("✅ Done", key=f"nba_done_{idx}"):
+                    _update_nba(company_id, idx, "done")
+                    st.rerun()
+                if cols[2].button("✖ Skip", key=f"nba_skip_{idx}"):
+                    _update_nba(company_id, idx, "dismissed")
+                    st.rerun()
+            done = [n for n in nbas if n.get("status") == "done"]
+            if done:
+                with st.expander(f"✓ Completed ({len(done)})", expanded=False):
+                    for n in done:
+                        st.markdown(f"- ~~{n.get('action','?')}~~")
     else:
         st.info("No AI assessment yet. Hit Refresh to compute one.")
 
 st.write("")
 
+
+# --- JAZ-187: Risk trajectory chart ------------------------------------------
+try:
+    risk_hist = api_get(f"/account/{cid}/risk_history", limit=30) or []
+except Exception:  # noqa: BLE001
+    risk_hist = []
+if risk_hist and len(risk_hist) >= 2:
+    with st.expander(f"📈 Risk trajectory ({len(risk_hist)} assessments)", expanded=False):
+        try:
+            df = pd.DataFrame(risk_hist)
+            df["generated_at"] = pd.to_datetime(df["generated_at"])
+            df = df.set_index("generated_at")
+            st.line_chart(df[["risk_score"]], height=200)
+            latest = risk_hist[-1]
+            first = risk_hist[0]
+            delta = (latest.get("risk_score") or 0) - (first.get("risk_score") or 0)
+            arrow = "↗️ rising" if delta > 5 else ("↘️ easing" if delta < -5 else "➡️ flat")
+            st.caption(
+                f"{arrow} — {first['risk_flag']} ({first.get('risk_score')}) → "
+                f"{latest['risk_flag']} ({latest.get('risk_score')}) over {len(risk_hist)} assessments"
+            )
+        except Exception as exc:  # noqa: BLE001
+            st.caption(f"chart error: {exc}")
+
 # --- tabs ---------------------------------------------------------------------
-tab_support, tab_sales, tab_quotes, tab_contacts, tab_activity, tab_metrics, tab_hot, tab_integ, tab_raw = st.tabs(
+tab_support, tab_sales, tab_quotes, tab_contacts, tab_activity, tab_metrics, tab_hot, tab_integ, tab_ask, tab_raw = st.tabs(
     [
         f"🎫 Support ({len(tickets)})",
         f"💰 Sales ({len(deals)})",
@@ -348,6 +397,7 @@ tab_support, tab_sales, tab_quotes, tab_contacts, tab_activity, tab_metrics, tab
         "📊 Metrics",
         f"🔥 Hot signals ({len(hot_signals)})",
         "🔌 Integrations",
+        "💬 Ask AI",
         "📦 Raw",
     ]
 )
@@ -604,6 +654,57 @@ with tab_integ:
                 f"· last sync {fmt_iso(i['last_sync'])} "
                 f"· errors 24h {i['error_count_24h'] or 0}"
             )
+
+# --- JAZ-185: Ask AI ----------------------------------------------------------
+with tab_ask:
+    st.markdown(
+        "Ask anything about this account. Claude is constrained to the signals "
+        "on this page — ticket history, deals, contacts, activities, quotes. "
+        "It cites specific records and refuses to guess."
+    )
+    ask_key = f"ask_history_{cid}"
+    if ask_key not in st.session_state:
+        st.session_state[ask_key] = []
+    history_container = st.container()
+    with history_container:
+        for turn in st.session_state[ask_key]:
+            st.markdown(f"**👤 You:** {turn['q']}")
+            st.markdown(f"**🤖 AI:** {turn['a']}")
+            if turn.get("citations"):
+                st.caption("Cited: " + " · ".join(turn["citations"]))
+            st.divider()
+
+    suggestions = [
+        "What are the biggest risks right now?",
+        "Are there any stalled deals?",
+        "Who should I reach out to first?",
+        "Summarize the last 30 days of activity.",
+    ]
+    sug_cols = st.columns(len(suggestions))
+    chosen_question = None
+    for i, s in enumerate(suggestions):
+        if sug_cols[i].button(s, key=f"sug_{i}"):
+            chosen_question = s
+
+    with st.form(f"ask_form_{cid}", clear_on_submit=True):
+        q = st.text_input("Your question", value=chosen_question or "", key=f"ask_input_{cid}")
+        submitted = st.form_submit_button("Ask")
+    if submitted and q.strip():
+        with st.spinner("Thinking..."):
+            try:
+                result = api_post(f"/account/{cid}/ask", json={"question": q})
+                st.session_state[ask_key].append({
+                    "q": q, "a": result.get("answer",""),
+                    "citations": result.get("citations", []),
+                    "model": result.get("model",""),
+                })
+                st.rerun()
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"Ask failed: {exc}")
+    if st.session_state[ask_key]:
+        if st.button("Clear conversation", key=f"clear_ask_{cid}"):
+            st.session_state[ask_key] = []
+            st.rerun()
 
 # --- Raw ----------------------------------------------------------------------
 with tab_raw:

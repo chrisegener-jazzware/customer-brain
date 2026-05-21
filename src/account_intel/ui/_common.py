@@ -16,8 +16,13 @@ def api_get(path: str, **params) -> dict | list:
     return r.json()
 
 
-def api_post(path: str, **params) -> dict:
-    r = httpx.post(f"{API_BASE}{path}", params=params, timeout=TIMEOUT * 2)
+def api_post(path: str, json: dict | None = None, **params) -> dict:
+    r = httpx.post(
+        f"{API_BASE}{path}",
+        params=params,
+        json=json,
+        timeout=TIMEOUT * 2,
+    )
     r.raise_for_status()
     return r.json()
 
