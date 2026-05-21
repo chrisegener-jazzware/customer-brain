@@ -48,10 +48,18 @@ def fmt_iso(s: str | None) -> str:
 
 
 def parse_iso(s: str | None) -> datetime | None:
+    """Parse ISO-8601 to a timezone-aware UTC datetime.
+
+    Naive datetimes are assumed UTC (callers compare against UTC cutoffs).
+    """
     if not s:
         return None
     try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        from datetime import timezone
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
     except Exception:
         return None
 

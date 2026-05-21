@@ -564,7 +564,12 @@ with tab_activity:
 
         def _in_window(a):
             ts = parse_iso(a.get("ts"))
-            return ts is None or ts >= cutoff
+            if ts is None:
+                return True
+            # Guard against naive datetimes from upstream parsers.
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=UTC)
+            return ts >= cutoff
 
         filtered = [a for a in activities if _in_window(a)]
         st.caption(f"{len(filtered)} engagement(s) in last {filter_choice}")
