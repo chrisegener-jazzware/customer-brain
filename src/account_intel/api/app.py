@@ -762,3 +762,122 @@ def get_modules(company_id: str, s: Session = Depends(get_session)) -> list[Modu
         )
         for r in run_all(s, company_id)
     ]
+
+
+# ---- SALES MODE ENDPOINTS --------------------------------------------------
+
+class PrecallBriefResponse(BaseModel):
+    markdown: str
+    model: str
+    is_fallback: bool
+
+
+@app.get("/account/{company_id}/sales/precall_brief", response_model=PrecallBriefResponse)
+def sales_precall_brief(company_id: str, s: Session = Depends(get_session)) -> PrecallBriefResponse:
+    if s.get(Company, company_id) is None:
+        raise HTTPException(404, f"unknown company {company_id}")
+    from ..sales import generate_precall_brief
+    b = generate_precall_brief(s, company_id)
+    return PrecallBriefResponse(markdown=b.markdown, model=b.model, is_fallback=b.is_fallback)
+
+
+class StalledExplanationResponse(BaseModel):
+    deal_id: str
+    deal_name: str | None
+    markdown: str
+    model: str
+    is_fallback: bool
+
+
+@app.get("/account/{company_id}/sales/explain_deal/{deal_id}", response_model=StalledExplanationResponse)
+def sales_explain_deal(company_id: str, deal_id: str, s: Session = Depends(get_session)) -> StalledExplanationResponse:
+    if s.get(Company, company_id) is None:
+        raise HTTPException(404, f"unknown company {company_id}")
+    from ..sales import explain_stalled_deal
+    try:
+        ex = explain_stalled_deal(s, company_id, deal_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+    return StalledExplanationResponse(
+        deal_id=ex.deal_id, deal_name=ex.deal_name, markdown=ex.markdown,
+        model=ex.model, is_fallback=ex.is_fallback,
+    )
+
+
+class EmailDraftRequest(BaseModel):
+    deal_id: str | None = None
+    contact_id: str | None = None
+
+
+class EmailDraftResponse(BaseModel):
+    subject: str
+    body: str
+    model: str
+    is_fallback: bool
+    suggested_to_email: str | None
+    suggested_to_name: str | None
+
+
+@app.post("/account/{company_id}/sales/draft_email", response_model=EmailDraftResponse)
+def sales_draft_email(company_id: str, req: EmailDraftRequest, s: Session = Depends(get_session)) -> EmailDraftResponse:
+    if s.get(Company, company_id) is None:
+        raise HTTPException(404, f"unknown company {company_id}")
+    from ..sales import draft_followup_email
+    d = draft_followup_email(s, company_id, deal_id=req.deal_id, contact_id=req.contact_id)
+    return EmailDraftResponse(
+        subject=d.subject, body=d.body, model=d.model, is_fallback=d.is_fallback,
+        suggested_to_email=d.suggested_to_email, suggested_to_name=d.suggested_to_name,
+    )
+
+
+# ---- Sales homepage: top opportunities across the book ----------------------
+
+class SalesPipelineHit(BaseModel):
+    company_id: str
+    company_name: str | None
+    open_deals: int
+    open_deal_value: float
+    stalled_deals: int
+    days_since_last_activity: float | None
+
+
+@app.get("/sales/pipeline", response_model=list[SalesPipelineHit])
+def sales_pipeline(limit: int = 25, s: Session = Depends(get_session)) -> list[SalesPipelineHit]:
+    """Top accounts by open pipeline value, with stalled flag for triage."""
+    from sqlalchemy import func, case, and_
+    # Aggregate per company.
+    open_filter = ~or_(DealSignal.is_won == True, DealSignal.is_lost == True)  # noqa: E712
+    rows = s.execute(
+        select(
+            DealSignal.company_id,
+            func.count().label("open_count"),
+            func.coalesce(func.sum(case((open_filter, DealSignal.amount), else_=0)), 0).label("open_value"),
+            func.sum(case((and_(open_filter, DealSignal.stalled == True), 1), else_=0)).label("stalled_count"),  # noqa: E712
+        )
+        .where(open_filter)
+        .group_by(DealSignal.company_id)
+        .order_by(desc("open_value"))
+        .limit(limit)
+    ).all()
+    out: list[SalesPipelineHit] = []
+    for r in rows:
+        co = s.get(Company, r.company_id)
+        # last activity timestamp
+        last_act = s.scalar(
+            select(func.max(ActivitySignal.ts))
+            .where(ActivitySignal.company_id == r.company_id)
+        )
+        days_since = None
+        if last_act:
+            from datetime import datetime, timezone
+            la = last_act.replace(tzinfo=timezone.utc) if last_act.tzinfo is None else last_act
+            days_since = round((datetime.now(timezone.utc) - la).total_seconds() / 86400, 1)
+        out.append(SalesPipelineHit(
+            company_id=r.company_id,
+            company_name=co.name if co else None,
+            open_deals=r.open_count,
+            open_deal_value=float(r.open_value or 0),
+            stalled_deals=int(r.stalled_count or 0),
+            days_since_last_activity=days_since,
+        ))
+    return out
