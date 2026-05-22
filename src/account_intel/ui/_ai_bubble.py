@@ -144,31 +144,49 @@ def render_panel(cid: str) -> None:
             unsafe_allow_html=True,
         )
 
-        # Header
+        # Header — hero card with avatar, gradient, status
         st.markdown(
-            '<div style="background:linear-gradient(135deg,#0b1d3a,#2563eb);'
-            'color:#fff;padding:18px 20px;border-radius:0 0 14px 14px;'
-            'margin:0 -18px 16px;">'
-            '<div style="font-weight:700;font-size:1.1em;display:flex;align-items:center;gap:10px;">'
-            '<span style="width:10px;height:10px;border-radius:50%;background:#34d399;'
-            'box-shadow:0 0 10px #34d399;animation:ji-pulse 2.2s infinite"></span>'
+            '<div style="position:relative;background:linear-gradient(135deg,#0b1d3a 0%,#1e3a72 50%,#2563eb 100%);'
+            'color:#fff;padding:22px 22px 26px;border-radius:0 0 18px 18px;'
+            'margin:0 -18px 18px;overflow:hidden;">'
+            '<div style="position:absolute;top:-30px;right:-30px;width:140px;height:140px;'
+            'border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,0.18),transparent 70%);"></div>'
+            '<div style="display:flex;align-items:center;gap:12px;">'
+            '<div style="width:42px;height:42px;border-radius:12px;background:rgba(255,255,255,0.18);'
+            'backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;'
+            'font-size:1.4em;flex-shrink:0;border:1px solid rgba(255,255,255,0.25);">🤖</div>'
+            '<div style="min-width:0;">'
+            '<div style="font-weight:700;font-size:1.05em;display:flex;align-items:center;gap:8px;">'
             'AI Service Concierge'
+            '<span style="width:8px;height:8px;border-radius:50%;background:#34d399;'
+            'box-shadow:0 0 10px #34d399;animation:ji-pulse 2.2s infinite"></span>'
             '</div>'
-            '<div style="font-size:0.82em;opacity:0.9;margin-top:4px;">'
-            'Grounded on your tickets and integrations · escalate to staff anytime'
+            '<div style="font-size:0.78em;opacity:0.9;margin-top:2px;">Online · Grounded on your service data</div>'
+            '</div>'
             '</div>'
             '</div>',
             unsafe_allow_html=True,
         )
 
-        # Sample prompts (only when no history)
+        # Sample prompts (only when no history) — styled as suggestion chips
         if not st.session_state[msgs_key]:
-            st.caption("Try a sample question:")
+            st.markdown(
+                '<div style="font-size:0.7em;font-weight:700;letter-spacing:0.14em;'
+                'text-transform:uppercase;color:#64748b;margin:4px 0 10px;">Try asking</div>',
+                unsafe_allow_html=True,
+            )
             for i, p in enumerate(SAMPLE_PROMPTS):
-                if st.button(p, key=f"{msgs_key}::sample::{i}", use_container_width=True):
+                if st.button(f"  {p}", key=f"{msgs_key}::sample::{i}", use_container_width=True):
                     _send(cid, p)
                     st.rerun()
             st.write("")
+            # Subtle separator + helper text
+            st.markdown(
+                '<div style="text-align:center;font-size:0.72em;color:#94a3b8;'
+                'padding:8px 0;border-top:1px dashed #e2e8f0;margin-top:12px;">'
+                '✨ Or type your own question below</div>',
+                unsafe_allow_html=True,
+            )
 
         # Message history
         for m in st.session_state[msgs_key]:
@@ -192,8 +210,25 @@ def render_panel(cid: str) -> None:
             with st.chat_message("assistant"):
                 st.markdown("_Thinking…_")
 
-        # Composer — use a form so Enter submits reliably and the value
-        # actually reaches us as a discrete event.
+        # Composer — styled form with rounded input + colored Send
+        st.markdown(
+            '<style>'
+            '.ji-composer { background:#f8fafc; border:1px solid #e2e8f0; border-radius:14px; '
+            'padding:10px 12px; margin-top:8px; }'
+            '.ji-composer [data-testid="stTextInput"] input { '
+            'background:#fff !important; border:1px solid #cbd5e1 !important; '
+            'border-radius:10px !important; padding:10px 12px !important; }'
+            '.ji-composer [data-testid="stTextInput"] input:focus { '
+            'border-color:#2563eb !important; box-shadow:0 0 0 3px rgba(37,99,235,0.15) !important; }'
+            '.ji-composer .stButton button[kind="primary"] { '
+            'background:linear-gradient(135deg,#2563eb,#0b1d3a) !important; '
+            'border:0 !important; font-weight:600 !important; }'
+            '.ji-composer .stButton button[kind="primary"]:hover { '
+            'transform:translateY(-1px); box-shadow:0 8px 18px -6px rgba(37,99,235,0.45) !important; }'
+            '</style>'
+            '<div class="ji-composer">',
+            unsafe_allow_html=True,
+        )
         with st.form(key=f"{msgs_key}::form", clear_on_submit=True):
             q = st.text_input(
                 "Ask anything…",
@@ -201,11 +236,12 @@ def render_panel(cid: str) -> None:
                 placeholder="Ask anything about your service…",
                 label_visibility="collapsed",
             )
-            c1, c2 = st.columns([1, 1])
+            c1, c2 = st.columns([2, 1])
             with c1:
-                submitted = st.form_submit_button("Send", type="primary", use_container_width=True)
+                submitted = st.form_submit_button("↗ Send", type="primary", use_container_width=True)
             with c2:
-                clear = st.form_submit_button("Clear chat", use_container_width=True)
+                clear = st.form_submit_button("Clear", use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
         if submitted and q.strip():
             st.session_state[pending_key] = q.strip()
             st.rerun()
@@ -213,8 +249,9 @@ def render_panel(cid: str) -> None:
             st.session_state[msgs_key] = []
             st.rerun()
 
-        # Escalate
-        if st.button("🙋  Talk to a person", key=f"{msgs_key}::escalate", use_container_width=True):
+        # Escalate — footer action
+        st.write("")
+        if st.button("🙋‍♂️  Talk to a person", key=f"{msgs_key}::escalate", use_container_width=True):
             st.session_state[msgs_key].append({
                 "role": "assistant",
                 "content": "I've flagged your account team — they'll reach out shortly. "
