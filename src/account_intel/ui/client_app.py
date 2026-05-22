@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 import streamlit as st
 
+from account_intel.ui._ai_bubble import render_panel as render_ai_bubble
 from account_intel.ui._common import api_get, fmt_days, fmt_iso, parse_iso
 from account_intel.ui._theme import (
     NAVY_900,
@@ -17,8 +18,12 @@ from account_intel.ui._theme import (
     SLATE_700,
     SLATE_900,
     ai_subcard,
+    animated_kpi_row,
+    hero_v2,
     inject_theme,
     kpi_row,
+    section_header,
+    value_snapshot_card,
 )
 
 st.set_page_config(
@@ -63,21 +68,33 @@ if not customers:
 
 names = [c.get("name") or c["id"] for c in customers]
 
-c1, c2 = st.columns([3, 1])
-with c1:
-    idx = st.selectbox(
-        "🔐 Logged in as (demo only)",
-        range(len(customers)),
-        format_func=lambda i: names[i],
-    )
-with c2:
-    st.write("")
-    st.write("")
+# ---- Top bar (replaces the clipping selectbox label) ------------------------
+st.markdown('<div class="ji-topbar">', unsafe_allow_html=True)
+tb_l, tb_c, tb_r = st.columns([4, 5, 3])
+with tb_l:
     st.markdown(
-        '<div style="text-align:right;">'
-        '<span class="ji-status-badge">🟢 On track</span></div>',
+        '<div class="ji-topbar-left">'
+        '<div class="ji-topbar-logo">J</div>'
+        '<div><div class="ji-topbar-sub">Jazzware</div>'
+        '<div class="ji-topbar-title">Customer Portal</div></div>'
+        '</div>',
         unsafe_allow_html=True,
     )
+with tb_c:
+    idx = st.selectbox(
+        "account",
+        range(len(customers)),
+        format_func=lambda i: names[i],
+        label_visibility="collapsed",
+    )
+with tb_r:
+    st.markdown(
+        '<div style="display:flex;justify-content:flex-end;align-items:center;height:100%;">'
+        '<span class="ji-topbar-pill"><span class="dot"></span>On track</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+st.markdown('</div>', unsafe_allow_html=True)
 
 cust = customers[idx]
 cid = cust["id"]
@@ -110,30 +127,21 @@ c = view["company"]
 assessment = view.get("assessment") or {}
 summaries = (assessment.get("summaries") or {}) if assessment else {}
 
-# --- hero (tightened) ---------------------------------------------------------
+# --- hero (v2 — animated gradient + glass meta box) --------------------------
 last_updated = fmt_iso(c.get("last_refreshed"))
+location = " · ".join(filter(None, [c.get("city"), c.get("country")]))
 st.markdown(
-    f"""
-    <div class="ji-hero">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;">
-        <div style="flex:1;">
-          <div class="ji-hero-eyebrow">JAZZWARE · CUSTOMER PORTAL</div>
-          <div class="ji-hero-title">{c['name'] or 'Welcome'}</div>
-          <div class="ji-hero-sub">
-            {c.get('industry') or 'Hospitality'} ·
-            {c.get('city') or ''} {c.get('country') or ''} ·
-            Your middleware status, service requests, and value reporting.
-          </div>
-        </div>
-        <div style="text-align:right;color:rgba(255,255,255,0.85);font-size:0.84em;
-                    min-width:160px;">
-          <div style="opacity:0.75;text-transform:uppercase;letter-spacing:0.08em;
-                      font-size:0.78em;">Last updated</div>
-          <div style="margin-top:2px;color:#ffffff;font-weight:600;">{last_updated}</div>
-        </div>
-      </div>
-    </div>
-    """,
+    hero_v2(
+        eyebrow="Customer Portal",
+        title=c["name"] or "Welcome",
+        subtitle=(
+            f"{c.get('industry') or 'Hospitality'}"
+            f"{' · ' + location if location else ''} · "
+            "Your middleware status, service requests, and value reporting."
+        ),
+        last_updated=last_updated,
+        status_label="On track",
+    ),
     unsafe_allow_html=True,
 )
 
@@ -180,48 +188,27 @@ if real_ints:
 else:
     uptime = 99.8
 
-kpi_row([
-    {"label": "Open requests", "value": str(len(open_t))},
-    {"label": "Resolved this quarter", "value": str(len(resolved_this_q))},
-    {"label": "Avg resolution", "value": f"{avg_res:.1f}d" if closed_t else "—"},
-    {"label": "Active integrations", "value": str(integration_count)},
-    {"label": "Uptime (30d)", "value": f"{uptime:.2f}%"},
-])
-
-st.write("")
+st.markdown(
+    animated_kpi_row([
+        {"label": "Open requests",        "value": str(len(open_t)),         "icon": "📋"},
+        {"label": "Resolved this quarter", "value": str(len(resolved_this_q)), "icon": "✅", "tone": "alt"},
+        {"label": "Avg resolution",       "value": f"{avg_res:.1f}d" if closed_t else "—", "icon": "⏱️"},
+        {"label": "Active integrations",  "value": str(integration_count),     "icon": "🔌"},
+        {"label": "Uptime (30d)",         "value": f"{uptime:.2f}%",            "icon": "🟢", "tone": "alt"},
+    ]),
+    unsafe_allow_html=True,
+)
 
 # --- Value snapshot (this quarter) -------------------------------------------
 try:
-    snap = api_get(f"/account/{COMPANY_ID}/value_snapshot")
+    snap = api_get(f"/account/{cid}/value_snapshot")
 except Exception:
     snap = None
 if snap:
-    nba_html = "".join(f"<li>{x}</li>" for x in (snap.get("nba_client") or [])) or "<li>No recommended actions this quarter.</li>"
-    st.markdown(
-        f'<div style="background:linear-gradient(135deg,#eef4fb,#fff);'
-        f'border:1px solid #d8e6f3;border-radius:14px;padding:16px 20px;margin-bottom:18px;'
-        f'box-shadow:0 1px 2px rgba(0,0,0,.04),0 4px 12px rgba(0,0,0,.04);color:#0b1220;">'
-        f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'
-        f'<div style="font-size:11px;font-weight:600;color:#64748b;letter-spacing:.04em;text-transform:uppercase">'
-        f'🎁 Value snapshot · {snap["period_label"]}</div></div>'
-        f'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px">'
-        f'<div><div style="font-size:22px;font-weight:700;color:#1b4f87">{snap["tickets_resolved"]}</div>'
-        f'<div style="font-size:11px;color:#64748b">Tickets resolved</div></div>'
-        f'<div><div style="font-size:22px;font-weight:700;color:#1b4f87">{snap["hours_saved_estimate"]}</div>'
-        f'<div style="font-size:11px;color:#64748b">Hours saved (est)</div></div>'
-        f'<div><div style="font-size:22px;font-weight:700;color:#1b4f87">{snap["outages_prevented"]}</div>'
-        f'<div style="font-size:11px;color:#64748b">Outages prevented</div></div>'
-        f'<div><div style="font-size:22px;font-weight:700;color:#1b4f87">{snap["integrations_healthy"]}/{snap["integrations_total"]}</div>'
-        f'<div style="font-size:11px;color:#64748b">Integrations healthy</div></div>'
-        f'</div>'
-        f'<div style="font-size:12px;color:#324158;margin-top:6px"><strong>What’s next for you:</strong>'
-        f'<ul style="margin:4px 0 0;padding-left:18px">{nba_html}</ul></div>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown(value_snapshot_card(snap), unsafe_allow_html=True)
 
-# --- tabs ---------------------------------------------------------------------
-tab_req, tab_health, tab_usage, tab_props, tab_insights, tab_team, tab_qvr, tab_roadmap, tab_ask = st.tabs(
+# --- tabs (Ask AI moved to floating bubble) ----------------------------------
+tab_req, tab_health, tab_usage, tab_props, tab_insights, tab_team, tab_qvr, tab_roadmap = st.tabs(
     [
         f"📋 Service requests ({len(open_t)})",
         "🔌 Integration health",
@@ -231,7 +218,6 @@ tab_req, tab_health, tab_usage, tab_props, tab_insights, tab_team, tab_qvr, tab_
         "👥 Account team",
         "📊 Quarterly Report",
         "🗺️ Roadmap",
-        "💬 Ask AI",
     ]
 )
 
@@ -524,7 +510,7 @@ with tab_qvr:
 
     st.markdown("### How you compare")
     try:
-        bms = api_get(f"/account/{COMPANY_ID}/benchmarks")
+        bms = api_get(f"/account/{cid}/benchmarks")
     except Exception:
         bms = []
     if bms:
@@ -565,7 +551,7 @@ with tab_qvr:
     with qbr_col2:
         import os
         _api_base = os.environ.get("API_BASE_URL", "http://localhost:8000")
-        st.link_button("📄 Download QBR", f"{_api_base}/account/{COMPANY_ID}/qbr_pdf", use_container_width=True)
+        st.link_button("📄 Download QBR", f"{_api_base}/account/{cid}/qbr_pdf", use_container_width=True)
 
 # --- Roadmap ------------------------------------------------------------------
 with tab_roadmap:
@@ -603,77 +589,11 @@ with tab_roadmap:
             unsafe_allow_html=True,
         )
 
-# --- Ask AI -------------------------------------------------------------------
-with tab_ask:
-    st.subheader("💬 Ask your service AI")
-    st.caption(
-        "Grounded on your tickets, integrations, and service history. "
-        "Sensitive details are filtered — escalate to your account team for anything commercial."
-    )
-
-    chat_key = f"ask_chat::{COMPANY_ID}"
-    if chat_key not in st.session_state:
-        st.session_state[chat_key] = []
-
-    # Sample prompts
-    samples = [
-        "Why was my last ticket escalated?",
-        "How is our uptime trending?",
-        "What's on the roadmap for us?",
-        "Summarize my open requests",
-    ]
-    sc1, sc2, sc3, sc4 = st.columns(4)
-    for col, s_ in zip((sc1, sc2, sc3, sc4), samples):
-        with col:
-            if st.button(s_, key=f"sample::{s_}", use_container_width=True):
-                st.session_state[chat_key].append({"role": "user", "content": s_})
-                try:
-                    resp = api_post(f"/account/{COMPANY_ID}/ask_client", json={"question": s_})
-                    st.session_state[chat_key].append({
-                        "role": "assistant",
-                        "content": resp.get("answer", "—"),
-                        "citations": resp.get("citations", []),
-                        "model": resp.get("model", ""),
-                    })
-                except Exception as e:
-                    st.session_state[chat_key].append({"role": "assistant", "content": f"I had trouble reaching the AI: {e}"})
-                st.rerun()
-
-    # Render history
-    for msg in st.session_state[chat_key]:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-            cites = msg.get("citations") or []
-            if cites:
-                pills = " ".join(
-                    f'<span style="background:#eef4fb;color:#1b4f87;padding:2px 8px;border-radius:9999px;font-size:11px;margin-right:4px">{c}</span>'
-                    for c in cites
-                )
-                st.markdown(
-                    f'<div style="margin-top:6px;font-size:11px;color:#64748b">'
-                    f'<span style="color:#10b981;font-weight:600">●</span> Grounded on: {pills}'
-                    f' · <em>{msg.get("model","")}</em></div>',
-                    unsafe_allow_html=True,
-                )
-
-    # Composer
-    q = st.chat_input("Ask anything about your service…")
-    if q:
-        st.session_state[chat_key].append({"role": "user", "content": q})
-        try:
-            resp = api_post(f"/account/{COMPANY_ID}/ask_client", json={"question": q})
-            st.session_state[chat_key].append({
-                "role": "assistant",
-                "content": resp.get("answer", "—"),
-                "citations": resp.get("citations", []),
-                "model": resp.get("model", ""),
-            })
-        except Exception as e:
-            st.session_state[chat_key].append({"role": "assistant", "content": f"I had trouble reaching the AI: {e}"})
-        st.rerun()
-
 st.divider()
 st.caption(
     "© Jazzware. This portal is a demo. Internal staff data, sales pipeline, and AI risk "
     "assessments are intentionally hidden from this client view."
 )
+
+# --- Floating AI bubble (always available, accessible from any tab) ----------
+render_ai_bubble(cid)
