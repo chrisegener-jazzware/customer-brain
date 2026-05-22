@@ -1,17 +1,12 @@
-"""Ask AI panel for the client portal.
+"""Ask AI side-drawer for the client portal.
 
-Reliable implementation:
-  - Toggle button rendered in a known location (called by client_app at the
-    top bar). Uses st.session_state to flip an `open` flag.
-  - When open, the panel renders inline (right after the toggle call) but
-    visually styled to look like a floating popup card.
+Reliable, simple implementation:
+  - Toggle button rendered in the top bar (via render_toggle).
+  - When open, a right-side slide-in drawer renders at the END of the
+    page. Position: fixed via inline style, no fragile sibling selectors.
+  - Uses st.text_input + Send button (NOT st.chat_input, which is
+    reserved for bottom-of-page and conflicts with our drawer).
   - Uses the client-safe `/ask_client` endpoint.
-
-The previous CSS sibling-selector approach (`anchor + div`) was fragile
-because Streamlit wraps elements in multiple containers. This version uses
-a wrapper `st.container()` styled via a stable class on a child markdown,
-and positions via a regular flex card (not position:fixed) — guarantees
-clicks land on the actual Streamlit button.
 """
 from __future__ import annotations
 
@@ -28,106 +23,198 @@ SAMPLE_PROMPTS = [
 ]
 
 
-def _key(company_id: str, suffix: str) -> str:
-    return f"ai_bubble::{company_id}::{suffix}"
+def _key(cid: str, suffix: str) -> str:
+    return f"ai_bubble::{cid}::{suffix}"
 
 
-def render_toggle(company_id: str) -> None:
-    """Render the 'Ask AI' button. Place this in the top bar."""
-    open_key = _key(company_id, "open")
+def render_toggle(cid: str) -> None:
+    """Top-bar button that opens/closes the drawer."""
+    open_key = _key(cid, "open")
     if open_key not in st.session_state:
         st.session_state[open_key] = False
-    is_open = st.session_state[open_key]
-    label = "✕  Close AI" if is_open else "💬  Ask AI"
+    label = "✕  Close AI" if st.session_state[open_key] else "💬  Ask AI"
     if st.button(label, key=f"{open_key}::toggle", type="primary", use_container_width=True):
-        st.session_state[open_key] = not is_open
+        st.session_state[open_key] = not st.session_state[open_key]
         st.rerun()
 
 
-def render_panel(company_id: str) -> None:
-    """Render the AI panel (only when open). Place this where you want the
-    panel to appear in the page — typically right under the top bar.
-    """
-    open_key = _key(company_id, "open")
-    msgs_key = _key(company_id, "msgs")
+def render_panel(cid: str) -> None:
+    """Render the right-side drawer when open. Call once at the END of the page."""
+    open_key = _key(cid, "open")
+    msgs_key = _key(cid, "msgs")
+    pending_key = _key(cid, "pending")
 
     if msgs_key not in st.session_state:
         st.session_state[msgs_key] = []
     if not st.session_state.get(open_key):
         return
 
-    # Header card
+    # ── Process any pending question that was submitted on the previous run ──
+    # st.text_input on Enter only persists value; we use the Send button OR
+    # a form so the submit is a discrete event. Using st.form below for
+    # reliable enter-to-submit behavior.
+    if st.session_state.get(pending_key):
+        q = st.session_state[pending_key]
+        st.session_state[pending_key] = ""
+        _send(cid, q)
+
+    # ── Drawer wrapper — fixed right-side slide-in ───────────────────────────
+    # We mark the wrapper div with a unique class so the CSS below can pin it.
+    drawer_class = f"ji-ai-drawer-{cid.replace('-', '_').replace(':', '_')}"
     st.markdown(
-        '<div style="background:linear-gradient(135deg,#0b1d3a,#2563eb);'
-        'color:#fff;padding:16px 20px;border-radius:14px 14px 0 0;'
-        'margin-bottom:0;animation:ji-pop-up .25s cubic-bezier(.2,.7,.3,1) both;">'
-        '<div style="font-weight:700;font-size:1.05em;display:flex;align-items:center;gap:10px;">'
-        '<span style="width:9px;height:9px;border-radius:50%;background:#34d399;'
-        'box-shadow:0 0 10px #34d399;animation:ji-pulse 2.2s infinite"></span>'
-        'AI Service Concierge'
-        '</div>'
-        '<div style="font-size:0.82em;opacity:0.88;margin-top:4px;">'
-        'Grounded on your tickets and integrations · escalate to staff anytime'
-        '</div>'
-        '</div>',
+        f"""
+        <style>
+        /* Pin the next Streamlit element-container (the one immediately after
+           this style block) to the right side of the viewport, sliding in. */
+        div[data-testid="stVerticalBlock"] > div.{drawer_class} ~ div {{ /* noop fallback */ }}
+
+        /* Use a sentinel + JS-free approach: we instead inline-style the
+           wrapper via a markdown div with the pinned class. Streamlit will
+           render this as a real DOM node; nested Streamlit elements appear
+           naturally inside. */
+        .ji-drawer-host {{
+          position: fixed;
+          top: 0;
+          right: 0;
+          height: 100vh;
+          width: 440px;
+          max-width: 92vw;
+          background: #ffffff;
+          border-left: 1px solid #cbd5e1;
+          box-shadow: -30px 0 60px -20px rgba(11,29,58,0.35);
+          z-index: 9999;
+          overflow-y: auto;
+          animation: ji-slide-in .28s cubic-bezier(.2,.7,.3,1) both;
+          padding: 0 18px 18px;
+        }}
+        @keyframes ji-slide-in {{
+          from {{ transform: translateX(100%); opacity: 0.4; }}
+          to   {{ transform: translateX(0);    opacity: 1;   }}
+        }}
+        /* Backdrop dim (subtle, doesn't block clicks behind) */
+        .ji-drawer-backdrop {{
+          position: fixed; inset: 0;
+          background: rgba(11,29,58,0.10);
+          z-index: 9998;
+          pointer-events: none;
+          animation: ji-fade-up .25s ease both;
+        }}
+        </style>
+        <div class="ji-drawer-backdrop"></div>
+        """,
         unsafe_allow_html=True,
     )
 
-    # Body wrapper
+    # The drawer body. Because Streamlit doesn't let us nest its widgets
+    # inside an arbitrary HTML wrapper, we use a CSS trick: render a marker
+    # div that styles its *parent* `[data-testid="stVerticalBlock"]` as the
+    # drawer. The selector below uses :has() (supported in modern browsers).
     st.markdown(
-        '<div style="background:#fff;border:1px solid #cbd5e1;border-top:0;'
-        'border-radius:0 0 14px 14px;padding:16px 18px 6px;'
-        'box-shadow:0 20px 40px -12px rgba(11,29,58,0.18);'
-        'margin-bottom:18px;">',
+        """
+        <style>
+        /* Style the vertical block that contains the drawer marker as the
+           fixed-position drawer. :has() is supported in Chrome/Safari/Edge
+           and recent Firefox. */
+        div[data-testid="stVerticalBlock"]:has(> div > div[data-ai-drawer-marker="true"]) {
+          position: fixed;
+          top: 0;
+          right: 0;
+          height: 100vh;
+          width: 440px;
+          max-width: 92vw;
+          background: #ffffff;
+          border-left: 1px solid #cbd5e1;
+          box-shadow: -30px 0 60px -20px rgba(11,29,58,0.35);
+          z-index: 9999;
+          overflow-y: auto;
+          animation: ji-slide-in .28s cubic-bezier(.2,.7,.3,1) both;
+          padding: 0 18px 18px;
+        }
+        </style>
+        """,
         unsafe_allow_html=True,
     )
 
-    # Sample prompts (only when no history)
-    if not st.session_state[msgs_key]:
-        st.caption("Try a sample question:")
-        cols = st.columns(2)
-        for i, p in enumerate(SAMPLE_PROMPTS):
-            with cols[i % 2]:
+    # Drawer content lives inside a Streamlit container so widgets work.
+    drawer = st.container()
+    with drawer:
+        # Marker div that the :has() selector above keys off of.
+        st.markdown(
+            '<div data-ai-drawer-marker="true"></div>',
+            unsafe_allow_html=True,
+        )
+
+        # Header
+        st.markdown(
+            '<div style="background:linear-gradient(135deg,#0b1d3a,#2563eb);'
+            'color:#fff;padding:18px 20px;border-radius:0 0 14px 14px;'
+            'margin:0 -18px 16px;">'
+            '<div style="font-weight:700;font-size:1.1em;display:flex;align-items:center;gap:10px;">'
+            '<span style="width:10px;height:10px;border-radius:50%;background:#34d399;'
+            'box-shadow:0 0 10px #34d399;animation:ji-pulse 2.2s infinite"></span>'
+            'AI Service Concierge'
+            '</div>'
+            '<div style="font-size:0.82em;opacity:0.9;margin-top:4px;">'
+            'Grounded on your tickets and integrations · escalate to staff anytime'
+            '</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        # Sample prompts (only when no history)
+        if not st.session_state[msgs_key]:
+            st.caption("Try a sample question:")
+            for i, p in enumerate(SAMPLE_PROMPTS):
                 if st.button(p, key=f"{msgs_key}::sample::{i}", use_container_width=True):
-                    _send(company_id, p)
+                    _send(cid, p)
                     st.rerun()
+            st.write("")
 
-    # Message history
-    for m in st.session_state[msgs_key]:
-        with st.chat_message(m["role"]):
-            st.markdown(m["content"])
-            if m.get("citations"):
-                pills = " ".join(
-                    f'<span style="background:#eff6ff;color:#1e40af;'
-                    f'padding:2px 8px;border-radius:9999px;font-size:11px;'
-                    f'margin-right:4px;display:inline-block;margin-top:4px;">{c}</span>'
-                    for c in m["citations"]
-                )
-                st.markdown(
-                    f'<div style="margin-top:6px;font-size:11px;color:#64748b;">'
-                    f'<span style="color:#059669;font-weight:600;">●</span> Grounded on: {pills}'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
+        # Message history
+        for m in st.session_state[msgs_key]:
+            with st.chat_message(m["role"]):
+                st.markdown(m["content"])
+                if m.get("citations"):
+                    pills = " ".join(
+                        f'<span style="background:#eff6ff;color:#1e40af;'
+                        f'padding:2px 8px;border-radius:9999px;font-size:11px;'
+                        f'margin-right:4px;display:inline-block;margin-top:4px;">{c}</span>'
+                        for c in m["citations"]
+                    )
+                    st.markdown(
+                        f'<div style="margin-top:6px;font-size:11px;color:#64748b;">'
+                        f'<span style="color:#059669;font-weight:600;">●</span> Grounded on: {pills}'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
 
-    if st.session_state.get(_key(company_id, "busy")):
-        with st.chat_message("assistant"):
-            st.markdown("_Thinking…_")
+        if st.session_state.get(_key(cid, "busy")):
+            with st.chat_message("assistant"):
+                st.markdown("_Thinking…_")
 
-    # Composer
-    q = st.chat_input("Ask anything about your service…", key=f"{msgs_key}::input")
-    if q:
-        _send(company_id, q)
-        st.rerun()
-
-    # Footer actions
-    fc1, fc2 = st.columns([1, 1])
-    with fc1:
-        if st.button("🗑 Clear chat", key=f"{msgs_key}::clear", use_container_width=True):
+        # Composer — use a form so Enter submits reliably and the value
+        # actually reaches us as a discrete event.
+        with st.form(key=f"{msgs_key}::form", clear_on_submit=True):
+            q = st.text_input(
+                "Ask anything…",
+                key=f"{msgs_key}::input",
+                placeholder="Ask anything about your service…",
+                label_visibility="collapsed",
+            )
+            c1, c2 = st.columns([1, 1])
+            with c1:
+                submitted = st.form_submit_button("Send", type="primary", use_container_width=True)
+            with c2:
+                clear = st.form_submit_button("Clear chat", use_container_width=True)
+        if submitted and q.strip():
+            st.session_state[pending_key] = q.strip()
+            st.rerun()
+        if clear:
             st.session_state[msgs_key] = []
             st.rerun()
-    with fc2:
-        if st.button("🙋 Talk to a person", key=f"{msgs_key}::escalate", use_container_width=True):
+
+        # Escalate
+        if st.button("🙋  Talk to a person", key=f"{msgs_key}::escalate", use_container_width=True):
             st.session_state[msgs_key].append({
                 "role": "assistant",
                 "content": "I've flagged your account team — they'll reach out shortly. "
@@ -135,16 +222,14 @@ def render_panel(company_id: str) -> None:
             })
             st.rerun()
 
-    st.markdown('</div>', unsafe_allow_html=True)
 
-
-def _send(company_id: str, question: str) -> None:
-    msgs_key = _key(company_id, "msgs")
-    busy_key = _key(company_id, "busy")
+def _send(cid: str, question: str) -> None:
+    msgs_key = _key(cid, "msgs")
+    busy_key = _key(cid, "busy")
     st.session_state[msgs_key].append({"role": "user", "content": question})
     st.session_state[busy_key] = True
     try:
-        resp = api_post(f"/account/{company_id}/ask_client", json={"question": question})
+        resp = api_post(f"/account/{cid}/ask_client", json={"question": question})
         st.session_state[msgs_key].append({
             "role": "assistant",
             "content": resp.get("answer", "—"),
