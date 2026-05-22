@@ -19,3 +19,5 @@ node_modules/
 .DS_Store
 .idea/
 .vscode/
+account_intel.db
+*.db
