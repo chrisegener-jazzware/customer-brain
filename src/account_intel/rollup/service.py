@@ -244,19 +244,22 @@ class RollupService:
             s.refresh(row)
             return row
 
-    def ask(self, company_id: str, question: str) -> dict[str, Any]:
+    def ask(self, company_id: str, question: str, client_safe: bool = False) -> dict[str, Any]:
         """JAZ-185 — grounded Q&A on a single account's signals.
 
-        Builds the same signal payload used for rollups, then asks Claude
-        the user's question constrained to those facts. Returns a dict:
-          {"answer": str, "model": str, "citations": list[str]}
+        Builds the signal payload used for rollups, then asks Claude
+        the user's question constrained to those facts.
 
-        Citations are signal-source tags Claude is instructed to cite
-        (e.g. "ticket:T-1234", "deal:D-9876"). Falls back to a heuristic
-        no-AI response if Claude is unavailable.
+        When `client_safe=True` (client portal), the prompt strips internal
+        risk language and forbids exposing deal amounts, internal notes,
+        or AM-only commentary. Tone is hospitality-customer-friendly.
+
+        Returns:  {"answer": str, "model": str, "citations": list[str]}
         """
         with self.session_factory() as s:
             payload = build_signals_payload(s, company_id)
+        if client_safe:
+            payload = self._scrub_for_client(payload)
         client = self._ensure_client()
         if client is None:
             return {
@@ -265,15 +268,28 @@ class RollupService:
                 "citations": [],
             }
         try:
-            system = (
-                "You are a customer-intelligence analyst answering questions "
-                "about a single account using ONLY the signals payload "
-                "provided. Cite specific tickets, deals, contacts, or "
-                "activities inline using the format [ticket:ID], [deal:ID], "
-                "[contact:ID]. If the answer is not in the signals, say so "
-                "plainly — do not guess. Keep answers under 200 words "
-                "unless the user explicitly asks for more depth."
-            )
+            if client_safe:
+                system = (
+                    "You are the AI service assistant inside a customer-facing "
+                    "portal for a hotel-tech provider. You are speaking TO the "
+                    "customer about THEIR account. Use only the signals payload. "
+                    "Cite specific tickets or properties inline as [ticket:ID] "
+                    "or [property:NAME]. Never mention deal amounts, internal "
+                    "risk flags, AM names, churn risk, or commercial commentary. "
+                    "Tone: warm, professional, transparent. If the answer is "
+                    "not in the signals, say so and offer to connect them with "
+                    "their account team. Keep answers under 150 words."
+                )
+            else:
+                system = (
+                    "You are a customer-intelligence analyst answering questions "
+                    "about a single account using ONLY the signals payload "
+                    "provided. Cite specific tickets, deals, contacts, or "
+                    "activities inline using the format [ticket:ID], [deal:ID], "
+                    "[contact:ID]. If the answer is not in the signals, say so "
+                    "plainly — do not guess. Keep answers under 200 words "
+                    "unless the user explicitly asks for more depth."
+                )
             user_msg = (
                 f"Question: {question}\n\n"
                 f"Signals payload:\n```json\n{json.dumps(payload, indent=2)}\n```"
@@ -298,6 +314,28 @@ class RollupService:
                 "model": "heuristic-fallback",
                 "citations": [],
             }
+
+    @staticmethod
+    def _scrub_for_client(payload: dict) -> dict:
+        """Strip internal-only fields from the signal payload before passing
+        to a client-facing prompt. We keep tickets + activity timeline +
+        integration health, but remove deal amounts, AM names, risk flags,
+        and internal notes.
+        """
+        out = {k: v for k, v in payload.items() if k not in ("deals", "quotes", "metrics")}
+        # Light deals echo — stage only, no amounts.
+        if "deals" in payload:
+            out["deals"] = [
+                {k: v for k, v in d.items() if k in ("id", "stage", "created_at", "close_date", "is_open")}
+                for d in payload["deals"]
+            ]
+        # Tickets: drop internal notes.
+        if "tickets" in out:
+            out["tickets"] = [
+                {k: v for k, v in t.items() if k not in ("internal_notes", "am_owner", "risk_tag")}
+                for t in out["tickets"]
+            ]
+        return out
 
     @staticmethod
     def _heuristic_ask(payload: dict, question: str) -> str:

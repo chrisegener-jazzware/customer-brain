@@ -190,8 +190,38 @@ kpi_row([
 
 st.write("")
 
+# --- Value snapshot (this quarter) -------------------------------------------
+try:
+    snap = api_get(f"/account/{COMPANY_ID}/value_snapshot")
+except Exception:
+    snap = None
+if snap:
+    nba_html = "".join(f"<li>{x}</li>" for x in (snap.get("nba_client") or [])) or "<li>No recommended actions this quarter.</li>"
+    st.markdown(
+        f'<div style="background:linear-gradient(135deg,#eef4fb,#fff);'
+        f'border:1px solid #d8e6f3;border-radius:14px;padding:16px 20px;margin-bottom:18px;'
+        f'box-shadow:0 1px 2px rgba(0,0,0,.04),0 4px 12px rgba(0,0,0,.04);color:#0b1220;">'
+        f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'
+        f'<div style="font-size:11px;font-weight:600;color:#64748b;letter-spacing:.04em;text-transform:uppercase">'
+        f'🎁 Value snapshot · {snap["period_label"]}</div></div>'
+        f'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px">'
+        f'<div><div style="font-size:22px;font-weight:700;color:#1b4f87">{snap["tickets_resolved"]}</div>'
+        f'<div style="font-size:11px;color:#64748b">Tickets resolved</div></div>'
+        f'<div><div style="font-size:22px;font-weight:700;color:#1b4f87">{snap["hours_saved_estimate"]}</div>'
+        f'<div style="font-size:11px;color:#64748b">Hours saved (est)</div></div>'
+        f'<div><div style="font-size:22px;font-weight:700;color:#1b4f87">{snap["outages_prevented"]}</div>'
+        f'<div style="font-size:11px;color:#64748b">Outages prevented</div></div>'
+        f'<div><div style="font-size:22px;font-weight:700;color:#1b4f87">{snap["integrations_healthy"]}/{snap["integrations_total"]}</div>'
+        f'<div style="font-size:11px;color:#64748b">Integrations healthy</div></div>'
+        f'</div>'
+        f'<div style="font-size:12px;color:#324158;margin-top:6px"><strong>What’s next for you:</strong>'
+        f'<ul style="margin:4px 0 0;padding-left:18px">{nba_html}</ul></div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
 # --- tabs ---------------------------------------------------------------------
-tab_req, tab_health, tab_usage, tab_props, tab_insights, tab_team, tab_qvr, tab_roadmap = st.tabs(
+tab_req, tab_health, tab_usage, tab_props, tab_insights, tab_team, tab_qvr, tab_roadmap, tab_ask = st.tabs(
     [
         f"📋 Service requests ({len(open_t)})",
         "🔌 Integration health",
@@ -201,6 +231,7 @@ tab_req, tab_health, tab_usage, tab_props, tab_insights, tab_team, tab_qvr, tab_
         "👥 Account team",
         "📊 Quarterly Report",
         "🗺️ Roadmap",
+        "💬 Ask AI",
     ]
 )
 
@@ -491,6 +522,32 @@ with tab_qvr:
     for h in highlights:
         st.markdown(f'<div class="ji-value-event">✓ {h}</div>', unsafe_allow_html=True)
 
+    st.markdown("### How you compare")
+    try:
+        bms = api_get(f"/account/{COMPANY_ID}/benchmarks")
+    except Exception:
+        bms = []
+    if bms:
+        bench_html = "".join(
+            f'<tr><td style="padding:6px 8px;color:#324158">{b["label"]}</td>'
+            f'<td style="padding:6px 8px;text-align:right;font-weight:600;color:#1b4f87">{b["your_value"] if b["your_value"] is not None else "—"}</td>'
+            f'<td style="padding:6px 8px;text-align:right;color:#64748b">{b["portfolio_avg"] if b["portfolio_avg"] is not None else "—"}</td>'
+            f'<td style="padding:6px 8px;text-align:right">'
+            f'<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:9999px;font-size:11px;font-weight:600">{b["percentile"] if b["percentile"] is not None else "—"}{"%ile" if b["percentile"] is not None else ""}</span>'
+            f'</td></tr>'
+            for b in bms
+        )
+        st.markdown(
+            f'<table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:6px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden">'
+            f'<thead><tr style="background:#f8fafc;font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.04em">'
+            f'<th style="padding:8px;text-align:left">Metric</th>'
+            f'<th style="padding:8px;text-align:right">You</th>'
+            f'<th style="padding:8px;text-align:right">Portfolio avg</th>'
+            f'<th style="padding:8px;text-align:right">Ranking</th></tr></thead>'
+            f'<tbody>{bench_html}</tbody></table>',
+            unsafe_allow_html=True,
+        )
+
     st.markdown("### What's next")
     st.markdown(
         f"""
@@ -499,6 +556,15 @@ with tab_qvr:
         - Quarterly value report will be delivered as a signed PDF by your CSM each quarter.
         """
     )
+
+    # QBR download
+    st.markdown("---")
+    qbr_col1, qbr_col2 = st.columns([3, 1])
+    with qbr_col1:
+        st.markdown("**Download this quarter's review as a PDF** to share with leadership.")
+    with qbr_col2:
+        from ._common import API_BASE
+        st.link_button("📄 Download QBR", f"{API_BASE}/account/{COMPANY_ID}/qbr_pdf", use_container_width=True)
 
 # --- Roadmap ------------------------------------------------------------------
 with tab_roadmap:
@@ -535,6 +601,75 @@ with tab_roadmap:
             f'</div>',
             unsafe_allow_html=True,
         )
+
+# --- Ask AI -------------------------------------------------------------------
+with tab_ask:
+    st.subheader("💬 Ask your service AI")
+    st.caption(
+        "Grounded on your tickets, integrations, and service history. "
+        "Sensitive details are filtered — escalate to your account team for anything commercial."
+    )
+
+    chat_key = f"ask_chat::{COMPANY_ID}"
+    if chat_key not in st.session_state:
+        st.session_state[chat_key] = []
+
+    # Sample prompts
+    samples = [
+        "Why was my last ticket escalated?",
+        "How is our uptime trending?",
+        "What's on the roadmap for us?",
+        "Summarize my open requests",
+    ]
+    sc1, sc2, sc3, sc4 = st.columns(4)
+    for col, s_ in zip((sc1, sc2, sc3, sc4), samples):
+        with col:
+            if st.button(s_, key=f"sample::{s_}", use_container_width=True):
+                st.session_state[chat_key].append({"role": "user", "content": s_})
+                try:
+                    resp = api_post(f"/account/{COMPANY_ID}/ask_client", json={"question": s_})
+                    st.session_state[chat_key].append({
+                        "role": "assistant",
+                        "content": resp.get("answer", "—"),
+                        "citations": resp.get("citations", []),
+                        "model": resp.get("model", ""),
+                    })
+                except Exception as e:
+                    st.session_state[chat_key].append({"role": "assistant", "content": f"I had trouble reaching the AI: {e}"})
+                st.rerun()
+
+    # Render history
+    for msg in st.session_state[chat_key]:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+            cites = msg.get("citations") or []
+            if cites:
+                pills = " ".join(
+                    f'<span style="background:#eef4fb;color:#1b4f87;padding:2px 8px;border-radius:9999px;font-size:11px;margin-right:4px">{c}</span>'
+                    for c in cites
+                )
+                st.markdown(
+                    f'<div style="margin-top:6px;font-size:11px;color:#64748b">'
+                    f'<span style="color:#10b981;font-weight:600">●</span> Grounded on: {pills}'
+                    f' · <em>{msg.get("model","")}</em></div>',
+                    unsafe_allow_html=True,
+                )
+
+    # Composer
+    q = st.chat_input("Ask anything about your service…")
+    if q:
+        st.session_state[chat_key].append({"role": "user", "content": q})
+        try:
+            resp = api_post(f"/account/{COMPANY_ID}/ask_client", json={"question": q})
+            st.session_state[chat_key].append({
+                "role": "assistant",
+                "content": resp.get("answer", "—"),
+                "citations": resp.get("citations", []),
+                "model": resp.get("model", ""),
+            })
+        except Exception as e:
+            st.session_state[chat_key].append({"role": "assistant", "content": f"I had trouble reaching the AI: {e}"})
+        st.rerun()
 
 st.divider()
 st.caption(
