@@ -141,28 +141,113 @@ if not selected_id:
     st.caption(
         "Unified per-customer view — support · sales · integrations · contacts · activity · AI roll-up"
     )
-    st.divider()
-    st.info("👈 Pick an account from the directory on the left, or use the search bar above it.")
 
-    if hits:
-        st.markdown("### Top risk accounts")
-        cols = st.columns(3)
-        for i, h in enumerate(sorted(hits, key=lambda x: -(x.get("risk_score") or 0))[:6]):
-            with cols[i % 3]:
-                color = _risk_color(h.get("risk_score"))
-                st.markdown(
-                    f"""<div class="ji-card" style="border-left:5px solid {color};">
-                          <div class="ji-card-title">{h['name'] or '(unnamed)'}</div>
-                          <div class="ji-card-body" style="color:#475569;font-size:0.88em;">
-                            {h.get('domain') or '—'}
-                          </div>
-                          <div style="margin-top:8px;">{risk_pill(h.get('risk_score'))}</div>
-                        </div>""",
-                    unsafe_allow_html=True,
+    # --- Triage my book hero (JAZ-256) ----------------------------------------
+    st.markdown(
+        """
+        <div style="
+          margin:18px 0 10px 0;padding:22px 26px;border-radius:16px;
+          background:linear-gradient(135deg,#0b1d3a 0%,#1e3a8a 55%,#3b82f6 100%);
+          color:#fff;box-shadow:0 8px 24px rgba(15,23,42,0.25);
+        ">
+          <div style="display:flex;align-items:center;gap:14px;">
+            <div style="font-size:1.9em;">🎯</div>
+            <div style="flex:1;">
+              <div style="font-size:1.35em;font-weight:700;letter-spacing:-0.01em;">Triage my book</div>
+              <div style="font-size:0.92em;opacity:0.85;margin-top:2px;">
+                AI ranks every account by risk, ticket pressure, silence, and stuck pipeline.
+                One click. Your Monday morning in two seconds.
+              </div>
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    btn_col, slot_col = st.columns([1, 4])
+    with btn_col:
+        if st.button("🎯 Triage now", type="primary", use_container_width=True, key="triage_run"):
+            st.session_state["triage_ran"] = True
+    with slot_col:
+        st.caption("Top 10 accounts needing attention right now.")
+
+    if st.session_state.get("triage_ran"):
+        with st.spinner("Triaging your book…"):
+            try:
+                triage = api_get("/triage/book", limit=10)
+            except Exception as e:  # noqa: BLE001
+                st.error(f"Triage failed: {e}")
+                triage = []
+
+        if not triage:
+            st.info("No accounts surfaced — your book is clean. 🎉")
+        else:
+            st.markdown("### Ranked")
+            for rank, t in enumerate(triage, start=1):
+                color = _risk_color(t.get("risk_score"))
+                # build a compact stats line
+                stats = []
+                if t.get("aged_tickets"):
+                    stats.append(f"🎫 {t['aged_tickets']} aged")
+                elif t.get("open_tickets"):
+                    stats.append(f"🎫 {t['open_tickets']} open")
+                if t.get("stuck_deals"):
+                    stats.append(f"💼 {t['stuck_deals']} stuck")
+                if t.get("days_since_last_activity") is not None:
+                    stats.append(f"🕒 {int(t['days_since_last_activity'])}d silent")
+                if t.get("open_pipeline_amount"):
+                    stats.append(f"💰 {fmt_money(t['open_pipeline_amount'])} open")
+                stats_line = "  ·  ".join(stats) if stats else "—"
+
+                reasons_html = "".join(
+                    f"<li style='margin:2px 0;'>{r}</li>" for r in (t.get("top_reasons") or [])
                 )
-                if st.button("Open", key=f"top_{h['id']}", use_container_width=True):
-                    st.session_state["selected_id"] = h["id"]
-                    st.rerun()
+                suggested = t.get("suggested_action")
+                suggested_html = (
+                    f"<div style='margin-top:8px;padding:8px 10px;background:#f1f5f9;border-radius:8px;"
+                    f"font-size:0.88em;color:#0b1d3a;'><b>Suggested:</b> {suggested}</div>"
+                    if suggested else ""
+                )
+
+                card_col, btn_col2 = st.columns([6, 1])
+                with card_col:
+                    st.markdown(
+                        f"""
+                        <div style="
+                          border:1px solid #e2e8f0;border-left:5px solid {color};
+                          border-radius:12px;padding:14px 18px;margin-bottom:10px;
+                          background:#fff;box-shadow:0 1px 3px rgba(15,23,42,0.04);
+                        ">
+                          <div style="display:flex;align-items:center;gap:10px;">
+                            <div style="font-size:0.78em;color:#64748b;font-weight:600;">#{rank}</div>
+                            <div style="font-size:1.08em;font-weight:700;color:#0b1d3a;">
+                              {t.get('company_name') or t['company_id']}
+                            </div>
+                            {risk_pill(t.get('risk_score'))}
+                            <div style="margin-left:auto;font-size:0.78em;color:#64748b;">
+                              triage score <b style="color:#0b1d3a;">{t.get('triage_score'):.0f}</b>
+                            </div>
+                          </div>
+                          <div style="color:#475569;font-size:0.85em;margin-top:4px;">
+                            {t.get('domain') or '—'}  ·  {stats_line}
+                          </div>
+                          <ul style="margin:8px 0 0 18px;padding:0;color:#334155;font-size:0.9em;">
+                            {reasons_html}
+                          </ul>
+                          {suggested_html}
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                with btn_col2:
+                    st.write("")
+                    if st.button("Open ›", key=f"tri_{t['company_id']}", use_container_width=True):
+                        st.session_state["selected_id"] = t["company_id"]
+                        st.rerun()
+
+    st.divider()
+    st.info("👈 Or pick an account from the directory on the left.")
     st.stop()
 
 # --- account view -------------------------------------------------------------

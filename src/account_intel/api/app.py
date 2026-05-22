@@ -152,6 +152,25 @@ class AccountView(BaseModel):
     assessment: AssessmentDTO | None
 
 
+class TriageHitDTO(BaseModel):
+    """One ranked account in /triage/book."""
+    company_id: str
+    company_name: str | None
+    domain: str | None
+    risk_flag: str | None              # red / yellow / green
+    risk_score: float | None           # 0..100 (AI assessment score, falls back to company.risk_score)
+    triage_score: float                # composite 0..100 used for ranking
+    open_tickets: int
+    aged_tickets: int                  # tickets >14d open
+    open_pipeline_amount: float | None
+    stuck_deals: int
+    days_since_last_activity: float | None
+    annual_revenue: float | None
+    top_reasons: list[str]             # 1-3 short bullets
+    suggested_action: str | None       # first next-best-action from latest assessment
+    hubspot_url: str
+
+
 # --- helpers ------------------------------------------------------------------
 
 
@@ -881,6 +900,147 @@ def sales_pipeline(limit: int = 25, s: Session = Depends(get_session)) -> list[S
             days_since_last_activity=days_since,
         ))
     return out
+
+
+# ============================================================================
+# Triage my book (JAZ-256) — ranked list of accounts needing attention
+# ============================================================================
+
+
+@app.get("/triage/book", response_model=list[TriageHitDTO])
+def triage_book(
+    limit: int = 10,
+    owner_id: str | None = Query(None, description="Filter to a single HubSpot owner id"),
+    s: Session = Depends(get_session),
+) -> list[TriageHitDTO]:
+    """One-click ranked list: 'what should I look at first this morning?'.
+
+    Composite score = 0..100 blending:
+      - risk_score          (50%)  — AI assessment / heuristic risk
+      - aged_ticket pressure (20%) — count of open tickets > 14d, capped at 5
+      - silence              (15%) — days since last activity, capped at 30
+      - stuck deals          (10%) — capped at 3
+      - revenue weight       (5%)  — log-scaled ARR
+    """
+    now = datetime.now(UTC)
+    q = select(Company)
+    if owner_id:
+        q = q.where(Company.hubspot_owner_id == owner_id)
+    companies = s.scalars(q).all()
+
+    hits: list[tuple[float, TriageHitDTO]] = []
+    for c in companies:
+        # Open / aged ticket counts
+        open_tickets = s.scalar(
+            select(func.count()).select_from(TicketSignal).where(
+                TicketSignal.company_id == c.id, TicketSignal.is_open == True  # noqa: E712
+            )
+        ) or 0
+        aged_tickets = s.scalar(
+            select(func.count()).select_from(TicketSignal).where(
+                TicketSignal.company_id == c.id,
+                TicketSignal.is_open == True,  # noqa: E712
+                TicketSignal.age_days > 14,
+            )
+        ) or 0
+
+        # Days since last activity (prefer denormalized field)
+        days_silent = c.days_since_last_activity
+        if days_silent is None and c.last_human_activity_at:
+            la = _as_utc(c.last_human_activity_at)
+            days_silent = round((now - la).total_seconds() / 86400.0, 1)
+
+        # Latest AI assessment
+        assess = s.scalars(
+            select(AIAssessment)
+            .where(AIAssessment.company_id == c.id)
+            .order_by(desc(AIAssessment.generated_at))
+            .limit(1)
+        ).first()
+
+        risk_score = (assess.risk_score if assess and assess.risk_score is not None else c.risk_score)
+        risk_flag = assess.risk_flag if assess else None
+        summaries = (assess.summaries_json or {}) if assess else {}
+        risk_drivers = summaries.get("risk_drivers") if isinstance(summaries, dict) else None
+        nbas = (assess.next_best_actions or []) if assess else []
+        suggested = None
+        if nbas:
+            first = nbas[0]
+            if isinstance(first, dict):
+                suggested = first.get("action") or first.get("title") or first.get("text")
+            elif isinstance(first, str):
+                suggested = first
+
+        # --- Composite score ---------------------------------------------------
+        rs = float(risk_score) if risk_score is not None else 0.0
+        rs = max(0.0, min(100.0, rs))
+        aged_pressure = min(aged_tickets, 5) / 5.0 * 100.0
+        silence_pressure = 0.0
+        if days_silent is not None:
+            silence_pressure = min(float(days_silent), 30.0) / 30.0 * 100.0
+        stuck = int(c.stuck_deals_count or 0)
+        stuck_pressure = min(stuck, 3) / 3.0 * 100.0
+        # Revenue weight: log-scale 0..100 between $10k and $10M ARR.
+        rev = float(c.annual_revenue or 0)
+        if rev > 0:
+            import math
+            lo, hi = math.log10(10_000), math.log10(10_000_000)
+            rev_weight = max(0.0, min(100.0, (math.log10(max(rev, 10_000)) - lo) / (hi - lo) * 100.0))
+        else:
+            rev_weight = 0.0
+
+        triage = (
+            0.50 * rs
+            + 0.20 * aged_pressure
+            + 0.15 * silence_pressure
+            + 0.10 * stuck_pressure
+            + 0.05 * rev_weight
+        )
+
+        # Skip dead-weight (no signal at all)
+        if triage < 1 and rs == 0 and open_tickets == 0 and stuck == 0:
+            continue
+
+        # --- Build top_reasons (prefer AI-written risk_drivers, else heuristics)
+        reasons: list[str] = []
+        if isinstance(risk_drivers, list):
+            reasons = [str(x) for x in risk_drivers if x][:3]
+        if not reasons:
+            if aged_tickets:
+                reasons.append(f"{aged_tickets} ticket{'s' if aged_tickets != 1 else ''} open >14d")
+            elif open_tickets:
+                reasons.append(f"{open_tickets} open ticket{'s' if open_tickets != 1 else ''}")
+            if stuck:
+                reasons.append(f"{stuck} stuck deal{'s' if stuck != 1 else ''}")
+            if days_silent is not None and days_silent >= 14:
+                reasons.append(f"{int(days_silent)}d since last activity")
+            if not reasons and rs >= 70:
+                reasons.append(f"AI risk score {rs:.0f}")
+        reasons = reasons[:3] or ["Composite signals flagged"]
+
+        hits.append((
+            triage,
+            TriageHitDTO(
+                company_id=c.id,
+                company_name=c.name,
+                domain=c.domain,
+                risk_flag=risk_flag,
+                risk_score=risk_score,
+                triage_score=round(triage, 1),
+                open_tickets=int(open_tickets),
+                aged_tickets=int(aged_tickets),
+                open_pipeline_amount=c.open_pipeline_amount,
+                stuck_deals=stuck,
+                days_since_last_activity=days_silent,
+                annual_revenue=c.annual_revenue,
+                top_reasons=reasons,
+                suggested_action=suggested,
+                hubspot_url=f"https://app.hubspot.com/contacts/_/record/0-2/{c.id}",
+            ),
+        ))
+
+    hits.sort(key=lambda t: -t[0])
+    return [h for _, h in hits[:limit]]
 
 
 # ============================================================================
