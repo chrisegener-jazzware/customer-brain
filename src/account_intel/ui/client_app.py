@@ -563,8 +563,9 @@ with tab_qvr:
     with qbr_col1:
         st.markdown("**Download this quarter's review as a PDF** to share with leadership.")
     with qbr_col2:
-        from ._common import API_BASE
-        st.link_button("📄 Download QBR", f"{API_BASE}/account/{COMPANY_ID}/qbr_pdf", use_container_width=True)
+        import os
+        _api_base = os.environ.get("API_BASE_URL", "http://localhost:8000")
+        st.link_button("📄 Download QBR", f"{_api_base}/account/{COMPANY_ID}/qbr_pdf", use_container_width=True)
 
 # --- Roadmap ------------------------------------------------------------------
 with tab_roadmap:
