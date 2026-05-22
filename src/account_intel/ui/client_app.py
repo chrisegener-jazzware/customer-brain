@@ -10,7 +10,8 @@ from datetime import datetime, timedelta
 import pandas as pd
 import streamlit as st
 
-from account_intel.ui._ai_bubble import render_panel as render_ai_bubble
+from account_intel.ui._ai_bubble import render_panel as render_ai_panel
+from account_intel.ui._ai_bubble import render_toggle as render_ai_toggle
 from account_intel.ui._common import api_get, fmt_days, fmt_iso, parse_iso
 from account_intel.ui._theme import (
     NAVY_900,
@@ -68,9 +69,9 @@ if not customers:
 
 names = [c.get("name") or c["id"] for c in customers]
 
-# ---- Top bar (replaces the clipping selectbox label) ------------------------
+# ---- Top bar (logo + account picker + status pill + Ask AI toggle) ----------
 st.markdown('<div class="ji-topbar">', unsafe_allow_html=True)
-tb_l, tb_c, tb_r = st.columns([4, 5, 3])
+tb_l, tb_c, tb_r, tb_ai = st.columns([3, 5, 2, 2])
 with tb_l:
     st.markdown(
         '<div class="ji-topbar-left">'
@@ -94,10 +95,17 @@ with tb_r:
         '</div>',
         unsafe_allow_html=True,
     )
+with tb_ai:
+    # Toggle is bound to the currently-selected company id; we render it
+    # here at the top bar so it's always one click away.
+    render_ai_toggle(customers[idx]["id"])
 st.markdown('</div>', unsafe_allow_html=True)
 
 cust = customers[idx]
 cid = cust["id"]
+
+# Render the AI panel just below the top bar when toggled open.
+render_ai_panel(cid)
 
 with st.spinner("Loading your portal..."):
     try:
@@ -595,5 +603,8 @@ st.caption(
     "assessments are intentionally hidden from this client view."
 )
 
-# --- Floating AI bubble (always available, accessible from any tab) ----------
-render_ai_bubble(cid)
+# --- Ask AI panel (renders only when toggled open from the top bar) ----------
+# Placed at the end so it doesn't disrupt page flow when closed. When open,
+# it appears as a polished card right above the footer.
+# (Better UX would be a true floating widget; Streamlit’s DOM makes that
+# fragile, so we use a clean anchored card instead.)
